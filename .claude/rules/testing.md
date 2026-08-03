@@ -1,6 +1,6 @@
 ---
 paths:
-  - "app/**/*.py"
+  - "src/**/*.py"
   - "tests/**/*.py"
 ---
 
@@ -10,19 +10,18 @@ No task is done without tests. This is not optional.
 
 ## New code
 
-- Write a **unit test** for every new function/class carrying business logic (mock/fake
-  dependencies via `Protocol`/ABC fakes or `unittest.mock`, full isolation from the DB and
-  network).
-- Write an **integration test** for every new repository method or DB-facing query, against a
-  real test database (containerized Postgres, or the project's configured test DB - never
-  assert against a mocked ORM session for these).
-- Write an **e2e test** for every new endpoint, via `httpx.AsyncClient`/FastAPI `TestClient`,
-  exercising the real route, dependency overrides only for external third parties (payment
-  providers, external APIs), not for the app's own layers.
-- Cover the nominal case, the boundary cases (empty, null/`None`, limits, pagination edges), the
-  business-error cases (validation, permissions, inconsistent states -> correct HTTP status),
-  and the technical-error cases when relevant (timeout, simulated dependency failure).
-- Review every conditional branch and exception path before closing the task.
+- Write a **unit test** for every new function/class with no I/O (`book0_cli/formatting.py`,
+  `book0_core/models.py`, `book0_core/errors.py`) - pure logic, no database, no filesystem.
+- Write an **integration test** for every new/changed `BookRepository` method or CLI behavior,
+  against a real temporary SQLite file built with a minimal Calibre-shaped schema (see
+  `tests/conftest.py`'s `calibre_metadata_db` fixture) - never assert against a mocked
+  `sqlite3.Connection` for these.
+- Cover the nominal case, the boundary cases (empty library, `NULL` `pubdate`, a book with
+  multiple authors), and the error cases (missing file, file exists but is not a Calibre
+  library) for every path that touches the database or the CLI's error handling.
+- Review every conditional branch and exception path before closing the task - in particular
+  both branches of `_resolve_db_path` (directory vs. file) and both caught exception types in
+  `book0_cli/main.py::run`.
 
 ## Modified existing code
 
@@ -36,8 +35,8 @@ No task is done without tests. This is not optional.
 
 ## Verification before handing back
 
-- Run the relevant suite (unit + integration + e2e for touched areas) after each change, not
-  only at the end.
+- Run the relevant suite (unit + integration for touched areas) after each change, not only at
+  the end.
 - For a bugfix, confirm the test is red without the fix and green with it. This proves the test
   actually tests something.
 - Do not consider work finished if a test is failing, a test was commented out or deleted without
@@ -46,9 +45,10 @@ No task is done without tests. This is not optional.
 ## Where the suites live
 
 - `tests/unit/` - fast, no I/O, run on every change.
-- `tests/integration/` - hits a real (test) database, run before considering a repository/DB
-  change done.
-- `tests/e2e/` - full app through HTTP, run before considering an endpoint change done.
+- `tests/integration/` - hits a real (temporary) SQLite file via `SqliteBookRepository`, or
+  drives `book0_cli.main.run` end to end; run before considering a repository/CLI change done.
+- There is no `tests/e2e/` - this is a CLI tool, not a web app; `tests/integration/` already
+  exercises `run()`/`main()` end to end via `capsys`.
 
 ## Running tests: always through uv
 
@@ -58,8 +58,5 @@ test):
 
 - All suites: `uv run pytest`
 - One suite/path: `uv run pytest tests/unit -v`
-- By marker (or the project's actual markers - check `pyproject.toml`/`pytest.ini` for the
-  real names and async config (`asyncio_mode`) before assuming these exact ones apply):
-  `uv run pytest -m unit`, `uv run pytest -m integration`, `uv run pytest -m e2e`
-- With coverage: `uv run pytest --cov=app --cov-report=term-missing`
-- A single test: `uv run pytest tests/unit/test_patients_service.py::test_create_patient -v`
+- With coverage: `uv run pytest --cov=src --cov-report=term-missing`
+- A single test: `uv run pytest tests/integration/test_sqlite_repository.py::test_missing_file_raises_library_not_found_error -v`

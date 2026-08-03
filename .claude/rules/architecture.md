@@ -1,74 +1,64 @@
 ---
 paths:
-  - "app/**"
+  - "src/**"
   - "tests/**"
 ---
 
 # Architecture and real source layout
 
-Before touching a file, identify which zone it belongs to. Conventions differ by zone.
+Before touching a file, identify which package it belongs to. Conventions differ by package.
 
-## Default layered layout
-
-> This map is a **starting point**, not a fixed spec - run `ls app/` and `ls tests/` for the
-> complete list of directories before assuming one does not exist, and update this file once
-> the real layout diverges.
+## Current layout
 
 ```
-app/
-├── api/
-│   ├── deps.py                  # shared FastAPI Depends() providers (DB session, current user...)
-│   └── <version>/<resource>/    # routers grouped by API version then resource, e.g. v1/patients/
-│       └── router.py            #   only orchestrates: parses request, calls a service, returns
-│                                 #   a schema. No business logic, no direct ORM/session use.
-├── schemas/<resource>.py         # Pydantic models: Request/Response DTOs. Never reused as ORM models.
-├── services/<resource>.py        # business logic, orchestrates repositories, raises domain
-│                                 #   exceptions. Framework-agnostic - no `Request`, no HTTP codes.
-├── repositories/<resource>.py     # data access only: queries, persistence. No business rules.
-├── models/<resource>.py           # SQLAlchemy ORM entities.
-├── core/                          # config (Settings via pydantic-settings), security, logging,
-│                                  #   startup/shutdown events, exception handlers
-├── db/                            # engine/session factory, Alembic env, base declarative class
-└── worker/                        # background tasks / Celery-RQ jobs, if the project has any
+src/
+├── book0_core/
+│   ├── models.py               # Book: frozen dataclass (id, title, authors, pubdate)
+│   ├── errors.py                # LibraryNotFoundError, NotACalibreLibraryError
+│   ├── repository.py            # BookRepository(Protocol): list_books() -> list[Book]
+│   └── sqlite_repository.py     # SqliteBookRepository: reads metadata.db read-only
+└── book0_cli/
+    ├── main.py                  # argparse entry point (`run`/`main`), wires a repository
+    └── formatting.py             # renders list[Book] as an aligned plain-text table
 
 tests/
-├── unit/                          # services + pure logic, all I/O mocked/faked
-├── integration/                   # repositories + DB, real test database (containerized/SQLite)
-└── e2e/                           # full app via httpx.AsyncClient / TestClient, real routes
+├── unit/                         # book0_cli formatting + book0_core models/errors, no I/O
+└── integration/                  # SqliteBookRepository and the CLI against a real temp SQLite file
 ```
 
-## If the project adopts a DDD-style split instead
+`tests/conftest.py` holds the shared Calibre-shaped SQLite fixture (`calibre_metadata_db`) and
+its expected `Book` list (`CALIBRE_LIBRARY_BOOKS`) - both `book0_core` and `book0_cli` tests
+build on it rather than each defining their own fixture DB.
 
-Some services outgrow the flat layered layout above and move to bounded contexts:
+## Planned addition: `book0_api`
 
-```
-app/
-├── domain/<context>/             # entities, value objects, domain events, <Context>RepositoryInterface
-├── infrastructure/<context>/      # SQLAlchemy<Context>Repository implementing the interface, adapters
-└── application/<context>/         # use cases / command-query handlers, calls domain + infra ports
-```
-
-If this project uses that split, replace the "Default layered layout" section above with the
-real tree and record the dependency rule below (Domain depends on nothing, Application and
-Infrastructure depend on Domain only - mirror it in an import-linter/deptrac-style config if
-one exists).
+A FastAPI service is planned to expose the same data over HTTP, plus a second
+`BookRepository` implementation (an HTTP client) so a future CLI mode can talk to it instead
+of the database directly. Neither exists yet - do not create `book0_api`, FastAPI routes,
+Pydantic schemas, or an HTTP-backed repository unless a task explicitly asks for them. When
+that work starts, this file must be updated with the real `book0_api` tree before it is used
+as a reference.
 
 ## Zone rule
-
-Identify the zone first:
 
 - Clean zone (recently written, matches the layout above): align strictly on the existing
   pattern.
 - Legacy/inherited zone (inconsistent, pre-dates this convention): do not copy bad practices.
   Propose a compliant version within the requested scope; do not launch an unrequested
   big-bang refactor.
+- This project is greenfield - there is no legacy zone yet. If you find one, it was introduced
+  after this file was written; report it rather than assuming it is intentional.
 
 ## Dependency direction
 
-- `api/` may depend on `services/` and `schemas/`. Never on `repositories/` or `models/`
-  directly.
-- `services/` may depend on `repositories/` (via interface/abstraction when one exists) and
-  `schemas/`. Never on `api/`.
-- `repositories/` may depend on `models/` and `db/`. Never on `services/` or `api/`.
-- If an import-linter / deptrac-equivalent config exists in the project, it is authoritative -
-  check it rather than guessing.
+- `book0_cli` may depend on `book0_core`. `book0_cli/main.py` orchestrates only: parses
+  arguments, constructs a repository, calls `formatting.render_table`, prints the result. No
+  SQL, no schema knowledge.
+- `book0_core` depends on nothing under `book0_cli` and on no web/HTTP framework. This is what
+  lets a future `book0_api` reuse `Book`, `BookRepository`, and `SqliteBookRepository`
+  unchanged.
+- Code that talks to `metadata.db` (SQL, `sqlite3.connect`, schema assumptions) lives only in
+  `book0_core/sqlite_repository.py`. Nothing outside it should open a connection or write SQL.
+- Anything that consumes books (a CLI command, a future API route) depends on the
+  `BookRepository` Protocol, not on `SqliteBookRepository` directly, so a second implementation
+  can be substituted without changing the caller.
