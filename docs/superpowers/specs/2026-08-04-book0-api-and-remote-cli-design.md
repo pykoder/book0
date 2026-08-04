@@ -32,12 +32,13 @@ src/
 ├── book0_cli/
 │   └── main.py                    # `book0` entry point: --library PATH -> SqliteLibraryGateway
 ├── book0_api/
-│   ├── main.py                    # FastAPI app: GET /libraries/{tag}/books
+│   ├── main.py                    # create_app(libraries: dict[str, Path]) -> FastAPI: GET /libraries/{tag}/books
+│   ├── asgi.py                    # `app` wired from BOOK0_API_CONFIG - the real uvicorn entry point
 │   ├── config.py                  # loads BOOK0_API_CONFIG (TOML) -> dict[str, Path]
 │   └── schemas.py                 # BookOut: id, title, authors: list[str], pubdate
 └── book0_cli_remote/
     ├── main.py                    # `book0-remote` entry point: --server URL --tag TAG -> HttpLibraryGateway
-    └── http_gateway.py             # HttpLibraryGateway(base_url, tag) implementing LibraryGateway
+    └── http_gateway.py             # HttpLibraryGateway(client, tag) implementing LibraryGateway
 ```
 
 Renames from the original design (already-shipped code, no external
@@ -111,6 +112,14 @@ consumers yet, so renaming in place is safe):
   silently) - raised as an unhandled exception at import/startup time, per
   the project's existing "let unexpected errors propagate" philosophy.
 
+  `book0_api/main.py` exposes `create_app(libraries: dict[str, Path]) ->
+  FastAPI` and never touches `os.environ` or the filesystem itself - all
+  env var / config-file reading lives in a separate `book0_api/asgi.py`
+  (`app = create_app(load_libraries(Path(os.environ["BOOK0_API_CONFIG"])))`),
+  which is what `uvicorn book0_api.asgi:app` targets. This split means
+  tests can build an app from an arbitrary in-memory `libraries` mapping
+  without ever setting `BOOK0_API_CONFIG`.
+
 - `schemas.py`: `BookOut` (Pydantic `BaseModel`) - `id: int`, `title: str`,
   `authors: list[str]` (JSON has no tuples), `pubdate: str | None`. A small
   `BookOut.from_book(book: Book) -> BookOut` classmethod converts.
@@ -141,9 +150,13 @@ consumers yet, so renaming in place is safe):
 
 ## `book0_cli_remote` (new package)
 
-- `http_gateway.py`: `HttpLibraryGateway` - constructor takes a base server
-  URL and a tag; implements `LibraryGateway.list_books()` by calling
-  `GET {base_url}/libraries/{tag}/books` via `httpx`.
+- `http_gateway.py`: `HttpLibraryGateway` - constructor takes an
+  `httpx.Client` (already configured with the server's base URL) and a
+  tag, rather than a raw URL string; implements `LibraryGateway.list_books()`
+  by calling `GET /libraries/{tag}/books` via that client. This is a
+  dependency-injection point, not just a spelling choice: it is what lets
+  tests pass a `fastapi.testclient.TestClient(app)` (itself an
+  `httpx.Client` subclass) instead of a real network client.
   - `200` -> parse the JSON array into `Book` objects (`authors` list ->
     tuple).
   - `404` with an `"error": "LibraryNotFoundError"` body -> raise
@@ -162,7 +175,8 @@ consumers yet, so renaming in place is safe):
 
 - `main.py`: entry point `book0-remote`, two required arguments:
   `--server URL` and `--tag TAG`.
-  - Builds an `HttpLibraryGateway(server, tag)`, calls `list_books()`,
+  - Builds an `httpx.Client(base_url=server)` and an
+    `HttpLibraryGateway(client, tag)`, calls `list_books()`,
     renders with `book0_presentation.tables.render_table`, prints to
     stdout - mirroring `book0_cli/main.py`'s structure.
   - Catches `LibraryNotFoundError` / `NotACalibreLibraryError` the same way
@@ -197,21 +211,24 @@ consumers yet, so renaming in place is safe):
   returns `500` with the `NotACalibreLibraryError` body.
 - **`book0_cli_remote`** (new `tests/integration/` cases): drive
   `HttpLibraryGateway` / `book0_cli_remote.main.run` against the same
-  FastAPI app via `httpx.Client(transport=httpx.ASGITransport(app=app))` -
-  no real socket, no separate server process. Cases mirror `book0_cli`'s
-  existing tests: known-tag table output, unknown-tag empty message, the
-  two error paths (404 -> `LibraryNotFoundError`, 500 ->
-  `NotACalibreLibraryError`), and one test for an unreachable server
-  (a bogus URL, no ASGI transport) asserting the stderr message and exit
-  code 1.
+  FastAPI app via `fastapi.testclient.TestClient(app)` passed in as the
+  `client` - no real socket, no separate server process. (A plain
+  `httpx.Client(transport=httpx.ASGITransport(app=app))`, the first thing
+  tried, does not work here: `ASGITransport` only implements the async
+  transport interface, and both `HttpLibraryGateway` and `book0_cli_remote`
+  are sync; `TestClient` is the sync-compatible bridge FastAPI itself
+  provides for exactly this.) Cases mirror `book0_cli`'s existing tests:
+  known-tag table output, unknown-tag empty message, the two error paths
+  (404 -> `LibraryNotFoundError`, 500 -> `NotACalibreLibraryError`), and one
+  test for an unreachable server (a real but unused local port, no
+  injected client) asserting the stderr message and exit code 1.
 
 ## `.claude` configuration updates
 
 - `CLAUDE.md`: stack line gains FastAPI + httpx; project-context bullet
   describes both CLIs and the API; tooling table gains
-  `uv run fastapi dev src/book0_api/main.py` (or
-  `uv run uvicorn book0_api.main:app --reload`) and
-  `uv run book0-remote --server <url> --tag <tag>`.
+  `BOOK0_API_CONFIG=<toml path> uv run uvicorn book0_api.asgi:app --reload`
+  and `uv run book0-remote --server <url> --tag <tag>`.
 - `.claude/rules/architecture.md`: tree updated to the layout above;
   dependency-direction rules extended for `book0_api`, `book0_cli_remote`,
   and `book0_presentation`.

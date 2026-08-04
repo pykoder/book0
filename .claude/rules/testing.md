@@ -10,18 +10,33 @@ No task is done without tests. This is not optional.
 
 ## New code
 
-- Write a **unit test** for every new function/class with no I/O (`book0_cli/formatting.py`,
-  `book0_core/models.py`, `book0_core/errors.py`) - pure logic, no database, no filesystem.
-- Write an **integration test** for every new/changed `BookRepository` method or CLI behavior,
-  against a real temporary SQLite file built with a minimal Calibre-shaped schema (see
-  `tests/conftest.py`'s `calibre_metadata_db` fixture) - never assert against a mocked
-  `sqlite3.Connection` for these.
-- Cover the nominal case, the boundary cases (empty library, `NULL` `pubdate`, a book with
-  multiple authors), and the error cases (missing file, file exists but is not a Calibre
-  library) for every path that touches the database or the CLI's error handling.
+- Write a **unit test** for every new function/class with no I/O
+  (`book0_presentation/tables.py`, `book0_core/models.py`, `book0_core/errors.py`,
+  `book0_api/config.py`'s loader, `book0_api/schemas.py`'s `BookOut.from_book`) - pure logic,
+  no database, no network, no filesystem beyond a temp file the test itself creates.
+- Write an **integration test** for every new/changed `LibraryGateway` method or CLI
+  behavior, against a real temporary SQLite file built with a minimal Calibre-shaped schema
+  (see `tests/conftest.py`'s `calibre_metadata_db` fixture) - never assert against a mocked
+  `sqlite3.Connection` or a mocked `httpx` response for these.
+- Write an **e2e test** for every new/changed `book0_api` route, via FastAPI's `TestClient`
+  (`fastapi.testclient.TestClient`) driving the real ASGI app - never assert against a
+  mocked route function.
+- To drive `HttpLibraryGateway` or `book0_cli_remote.main.run` against a real `book0_api` app
+  without a real socket, pass a `fastapi.testclient.TestClient(app)` instance as the
+  `client`/`httpx.Client` argument - it subclasses `httpx.Client` and bridges to the ASGI app
+  synchronously. Plain `httpx.Client(transport=httpx.ASGITransport(app=app))` does **not**
+  work for this - `ASGITransport` only implements the async transport interface, and both
+  gateways are sync.
+- Cover the nominal case, the boundary cases (empty library, an unconfigured tag treated as
+  an empty library, `NULL` `pubdate`, a book with multiple authors), and the error cases
+  (missing file, file exists but is not a Calibre library, and for the remote path: the
+  matching HTTP status/body, plus an unreachable server) for every path that touches the
+  database, the API, or either CLI's error handling.
 - Review every conditional branch and exception path before closing the task - in particular
-  both branches of `_resolve_db_path` (directory vs. file) and both caught exception types in
-  `book0_cli/main.py::run`.
+  both branches of `book0_cli/main.py::_resolve_db_path` (directory vs. file), both caught
+  exception types in either CLI's `run()`, and all three response branches in
+  `book0_api/main.py::list_books` (unknown tag, `LibraryNotFoundError`,
+  `NotACalibreLibraryError`).
 
 ## Modified existing code
 
@@ -35,8 +50,8 @@ No task is done without tests. This is not optional.
 
 ## Verification before handing back
 
-- Run the relevant suite (unit + integration for touched areas) after each change, not only at
-  the end.
+- Run the relevant suite (unit + integration + e2e for touched areas) after each change, not
+  only at the end.
 - For a bugfix, confirm the test is red without the fix and green with it. This proves the test
   actually tests something.
 - Do not consider work finished if a test is failing, a test was commented out or deleted without
@@ -45,10 +60,11 @@ No task is done without tests. This is not optional.
 ## Where the suites live
 
 - `tests/unit/` - fast, no I/O, run on every change.
-- `tests/integration/` - hits a real (temporary) SQLite file via `SqliteBookRepository`, or
-  drives `book0_cli.main.run` end to end; run before considering a repository/CLI change done.
-- There is no `tests/e2e/` - this is a CLI tool, not a web app; `tests/integration/` already
-  exercises `run()`/`main()` end to end via `capsys`.
+- `tests/integration/` - hits a real (temporary) SQLite file via `SqliteLibraryGateway`, or a
+  real FastAPI app (via `TestClient`) via `HttpLibraryGateway`, or drives either CLI's
+  `run()` end to end; run before considering a gateway/CLI change done.
+- `tests/e2e/` - drives `book0_api`'s routes directly via `TestClient`; run before
+  considering an API change done.
 
 ## Running tests: always through uv
 
@@ -59,4 +75,4 @@ test):
 - All suites: `uv run pytest`
 - One suite/path: `uv run pytest tests/unit -v`
 - With coverage: `uv run pytest --cov=src --cov-report=term-missing`
-- A single test: `uv run pytest tests/integration/test_sqlite_repository.py::test_missing_file_raises_library_not_found_error -v`
+- A single test: `uv run pytest tests/integration/test_sqlite_gateway.py::test_missing_file_raises_library_not_found_error -v`

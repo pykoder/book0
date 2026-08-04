@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from book0_presentation.tables import render_table
 from book0_cli.main import run
+from book0_presentation.tables import render_table
 from tests.conftest import CALIBRE_LIBRARY_BOOKS
 
 

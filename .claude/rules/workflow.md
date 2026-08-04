@@ -8,13 +8,16 @@ paths:
 
 Before any change, fix, or addition, always:
 
-1. **Explore the nearby code.** Read the module you are about to touch and its direct
-   neighbor in the other package (e.g. `sqlite_repository.py` alongside `main.py`) to identify:
+1. **Explore the nearby code.** Read the module you are about to touch and its counterpart
+   on the other side of the gateway abstraction if relevant (e.g. `sqlite_gateway.py`
+   alongside `http_gateway.py` when the domain query/output changes) to identify:
    - the naming conventions actually used;
-   - how errors are raised in `book0_core` and turned into CLI-facing messages in
-     `book0_cli/main.py`;
-   - how existing tests are written (fixtures in `tests/conftest.py`, `capsys` for CLI output);
-   - the dependency direction (`book0_cli` -> `book0_core`, never the reverse).
+   - how errors are raised in `book0_core`, mapped to HTTP in `book0_api/main.py`, and
+     reconstructed in `book0_cli_remote/http_gateway.py`;
+   - how existing tests are written (fixtures in `tests/conftest.py`, `capsys` for CLI
+     output, `TestClient` for the API/remote-gateway path);
+   - the dependency direction (`architecture.md`'s diagram - both CLIs and the API depend on
+     `book0_core`, never the reverse; neither CLI depends on the other).
 2. **Assess the quality of the touched zone**, then apply the zone rule from
    `architecture.md` (align strictly - this project has no legacy zone yet).
 3. **Never hallucinate a convention.** If the existing code is ambiguous or contradictory across
@@ -24,34 +27,43 @@ Before any change, fix, or addition, always:
 
 ### Debug
 1. Reproduce the bug (a failing test when possible) before looking for the cause.
-2. Identify which package it lives in: `book0_core` (data/domain: wrong query, wrong error
-   type) or `book0_cli` (path resolution, formatting, exit code).
+2. Identify which package it lives in: `book0_core` (wrong query, wrong error type),
+   `book0_api` (wrong status/body mapping), `book0_cli_remote` (wrong error reconstruction,
+   wrong request), or either CLI's `main.py` (path/flag resolution, formatting, exit code).
 3. Find the root cause, not just the symptom.
-4. Fix at the lowest coherent level. Do not patch `main.py` to mask a query bug in
-   `sqlite_repository.py`.
+4. Fix at the lowest coherent level. Do not patch a CLI's `main.py` to mask a bug in a
+   gateway, and do not patch `HttpLibraryGateway` to mask a bug in `book0_api`.
 5. Add or adapt the matching non-regression test.
-6. Search the usages of the changed function/class and confirm no other caller breaks.
+6. Search the usages of the changed function/class and confirm no other caller breaks - in
+   particular, a change to `book0_core.errors` or the `LibraryGateway` Protocol affects both
+   gateway implementations, not just the one you were looking at.
 
 ### Maintenance / evolution
-1. Identify the exact impact scope (files, tests, callers) across both packages.
+1. Identify the exact impact scope (files, tests, callers) across every affected package.
 2. Check SOLID/KISS/DRY/YAGNI before coding the solution.
 3. If the existing code violates these principles in the touched zone: report it, and propose an
    improvement scoped to the request. Do not perform an unrequested massive refactor.
-4. Update `docs/superpowers/specs/` only if a task explicitly asks for a new design doc;
-   otherwise keep documentation changes to this file and `CLAUDE.md`.
+4. Update the relevant design doc under `docs/superpowers/specs/` only if a task explicitly
+   asks for a new/updated design doc; otherwise keep documentation changes to this file and
+   `CLAUDE.md`.
 
 ### New feature
-1. Check whether the feature fits `book0_core` (new domain behavior, new repository method) or
-   `book0_cli` (new flag, new output shape), or genuinely needs a new module.
-2. Design against the layering in `architecture.md`: `book0_cli` calls `book0_core` through the
-   `BookRepository` Protocol. Never let `book0_cli` open a `sqlite3.Connection` or write SQL
-   directly.
+1. Check whether the feature fits `book0_core` (new domain behavior, new gateway method - if
+   so, **both** `SqliteLibraryGateway` and `HttpLibraryGateway` need it, plus the
+   `book0_api` route that serves it), `book0_presentation` (new output shape used by both
+   CLIs), or one CLI specifically (a flag/behavior unique to direct or remote access).
+2. Design against the layering in `architecture.md`: both CLIs call into `book0_core`
+   through the `LibraryGateway` Protocol; `book0_api` calls `book0_core` directly and
+   returns JSON. Never let a CLI open a `sqlite3.Connection` or write SQL directly, and never
+   let `book0_api` import a CLI package or `book0_presentation`.
 3. Write the code and its tests in parallel, not the tests "afterwards" - see the root
    `CLAUDE.md`'s TDD expectation.
-4. Check for duplication with neighboring features (DRY) before creating a new module/helper.
-5. If the feature changes `book0`'s command-line contract (new flag, changed output format),
-   keep `docs/superpowers/specs/2026-08-03-calibre-book-lister-design.md` in mind as the record
-   of the original design - note the divergence in your reply, do not silently drift from it.
+4. Check for duplication with neighboring features (DRY) before creating a new module/helper
+   - except the deliberate non-sharing between the two CLIs' `main.py` (see
+     `architecture.md`), which is not duplication to fix.
+5. A change to `book0_core`'s domain query/output (fields on `Book`, new error type) must be
+   reflected in **both** gateway implementations' tests, `book0_api`'s error-mapping table,
+   and both CLIs' rendering - not just the one you happened to be testing manually.
 
 ## End-of-task checklist
 
@@ -60,12 +72,13 @@ Before any change, fix, or addition, always:
 - [ ] No class/function added that has a single caller and no test.
 - [ ] `uv run ruff check .` / `uv run ruff format .` applied, `uv run mypy src` run, no new
       type error introduced (never invoked as bare `ruff`/`mypy`).
-- [ ] Unit tests written/updated for every touched piece of pure logic
-      (`book0_core/models.py`, `book0_cli/formatting.py`).
-- [ ] Integration tests written/updated for every touched repository method or CLI behavior.
+- [ ] Unit tests written/updated for every touched piece of pure logic.
+- [ ] Integration/e2e tests written/updated for every touched gateway method, CLI behavior,
+      or API route.
 - [ ] All impacted existing tests updated. No red test, no abusive skip.
 - [ ] Nominal, boundary, and error cases covered (missing library, non-Calibre file, empty
-      library, multiple authors, `NULL` pubdate).
-- [ ] No regression on the callers of the changed code (`book0_cli/main.py` if `book0_core`
-      changed; any future `book0_api` note if the `BookRepository` Protocol changes).
+      library, unconfigured tag, multiple authors, `NULL` pubdate, unreachable server).
+- [ ] No regression on the callers of the changed code - if `book0_core` changed, check both
+      `book0_cli` and `book0_api`; if the `LibraryGateway` Protocol changed, check both
+      `SqliteLibraryGateway` and `HttpLibraryGateway`.
 - [ ] Every ambiguity or gap with the existing code reported explicitly to the user.

@@ -1,5 +1,5 @@
-from book0_presentation.tables import render_table
 from book0_core.models import Book
+from book0_presentation.tables import render_table
 
 
 def test_render_table_aligns_columns_with_headers():

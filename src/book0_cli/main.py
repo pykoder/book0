@@ -2,9 +2,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from book0_presentation.tables import render_table
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.sqlite_gateway import SqliteLibraryGateway
+from book0_presentation.tables import render_table
 
 
 def _resolve_db_path(library_path: Path) -> Path:
