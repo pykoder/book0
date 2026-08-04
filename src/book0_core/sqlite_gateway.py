@@ -18,7 +18,7 @@ _LIST_BOOKS_QUERY = """
 """
 
 
-class SqliteBookRepository:
+class SqliteLibraryGateway:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
 

@@ -2,9 +2,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from book0_cli.formatting import render_table
+from book0_presentation.tables import render_table
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
-from book0_core.sqlite_repository import SqliteBookRepository
+from book0_core.sqlite_gateway import SqliteLibraryGateway
 
 
 def _resolve_db_path(library_path: Path) -> Path:
@@ -19,10 +19,10 @@ def run(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     db_path = _resolve_db_path(args.library)
-    repository = SqliteBookRepository(db_path)
+    gateway = SqliteLibraryGateway(db_path)
 
     try:
-        books = repository.list_books()
+        books = gateway.list_books()
     except (LibraryNotFoundError, NotACalibreLibraryError) as error:
         print(str(error), file=sys.stderr)
         return 1

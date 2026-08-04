@@ -1,4 +1,4 @@
-from book0_cli.formatting import render_table
+from book0_presentation.tables import render_table
 from book0_core.models import Book
 
 
