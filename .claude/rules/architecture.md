@@ -11,6 +11,8 @@ Before touching a file, identify which package it belongs to. Conventions differ
 ## Current layout
 
 ```
+book0-libraries.toml            # committed template for BOOK0_API_CONFIG: ${VAR_NAME}
+                                  # placeholders, never real paths - see config.py below
 src/
 ├── book0_core/
 │   ├── models.py               # Book: frozen dataclass (id, title, authors, pubdate)

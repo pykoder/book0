@@ -43,7 +43,7 @@ step.
 | Add a dev-only dependency | `uv add --dev <package>` |
 | Remove a dependency | `uv remove <package>` |
 | Run the direct CLI | `uv run book0 --library <path>` |
-| Run the API server | `BOOK0_API_CONFIG=<toml path> uv run uvicorn book0_api.asgi:app --reload` |
+| Run the API server | `<ENV VARS FOR EACH LIBRARY> BOOK0_API_CONFIG=book0-libraries.toml uv run uvicorn book0_api.asgi:app --reload` |
 | Run the remote CLI | `uv run book0-remote --server <url> --tag <tag>` |
 | Run the test suite | `uv run pytest` |
 | Run a test subset | `uv run pytest tests/unit -v` |

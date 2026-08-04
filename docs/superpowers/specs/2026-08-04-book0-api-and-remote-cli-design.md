@@ -97,20 +97,28 @@ consumers yet, so renaming in place is safe):
 
 - Config: `BOOK0_API_CONFIG` environment variable holds the path to a TOML
   file, read once at process startup with the stdlib `tomllib` (no new
-  dependency for parsing):
+  dependency for parsing). The committed template at
+  `book0-libraries.toml` (repo root) holds `${VAR_NAME}`-style
+  placeholders instead of real filesystem paths, so it is safe to commit
+  as-is - the real paths live in env vars set wherever the server actually
+  runs, not in the repo:
 
   ```toml
   [libraries]
-  fiction = "/path/to/fiction/metadata.db"
-  work = "/path/to/work/metadata.db"
+  fiction = "${FICTION_LIBRARY_PATH}"
+  work = "${WORK_LIBRARY_PATH}"
   ```
 
   `config.py` exposes a function that loads this file into
-  `dict[str, Path]` (tag -> `metadata.db` path). Missing/unset
-  `BOOK0_API_CONFIG`, or a file that fails to parse, is a startup-time
-  error (the process should fail fast, not serve with an empty map
-  silently) - raised as an unhandled exception at import/startup time, per
-  the project's existing "let unexpected errors propagate" philosophy.
+  `dict[str, Path]` (tag -> `metadata.db` path), expanding any
+  `${VAR_NAME}` placeholder in each path value against `os.environ`
+  (a bare regex substitution - no new dependency). Missing/unset
+  `BOOK0_API_CONFIG`, a file that fails to parse, or a placeholder whose
+  referenced env var isn't set, are all startup-time errors (the process
+  should fail fast, not serve with an empty or broken map silently) -
+  raised as an unhandled exception (`KeyError` for the last case) at
+  import/startup time, per the project's existing "let unexpected errors
+  propagate" philosophy.
 
   `book0_api/main.py` exposes `create_app(libraries: dict[str, Path]) ->
   FastAPI` and never touches `os.environ` or the filesystem itself - all

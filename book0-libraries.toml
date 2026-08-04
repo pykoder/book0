@@ -1,0 +1,18 @@
+# Template config for book0_api, referenced via BOOK0_API_CONFIG.
+#
+# Paths are env-var placeholders (${VAR_NAME}), not real filesystem paths -
+# this file is safe to commit as-is. Set the referenced env vars before
+# starting the server; each is substituted in at load time. A tag whose
+# placeholder references an unset env var makes the server fail to start
+# (fail fast, rather than silently serving a broken library).
+#
+# Add one line per library you want to expose, then point BOOK0_API_CONFIG
+# at this file:
+#   FICTION_LIBRARY_PATH=/path/to/fiction/metadata.db \
+#   WORK_LIBRARY_PATH=/path/to/work/metadata.db \
+#   BOOK0_API_CONFIG=book0-libraries.toml \
+#   uv run uvicorn book0_api.asgi:app --reload
+
+[libraries]
+fiction = "${FICTION_LIBRARY_PATH}"
+work = "${WORK_LIBRARY_PATH}"

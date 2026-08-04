@@ -75,6 +75,12 @@ paths:
   all env var / config-file reading lives in `book0_api/asgi.py`. This is what lets tests
   build an app with an arbitrary in-memory `libraries` mapping without touching
   `BOOK0_API_CONFIG` at all. Do not move config loading into `main.py` "for convenience".
+- `book0_api/config.py::load_libraries` expands `${VAR_NAME}` placeholders in each path value
+  against `os.environ` before returning - this is what lets `book0-libraries.toml` be
+  committed with no real filesystem paths in it. A placeholder referencing an unset env var
+  raises `KeyError` (uncaught, same "fail fast" philosophy as the missing/malformed config
+  file cases) rather than silently leaving the literal `${VAR_NAME}` text in the path or
+  falling back to some default.
 
 ## Coding standards
 
