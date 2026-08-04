@@ -42,8 +42,8 @@ src/
 │   ├── main.py                    # unchanged
 │   ├── asgi.py                    # import load_libraries from book0_config instead of book0_api.config
 │   └── schemas.py                 # unchanged
-│   # config.py deleted
-└── book0_cli_remote/               # unchanged
+│       (config.py deleted)
+└── book0_cli_remote/              # unchanged
 ```
 
 ### Dependency direction
