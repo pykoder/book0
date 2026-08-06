@@ -22,6 +22,7 @@ build-backend = "hatchling.build"
 packages = [
     "src/book0_core",
     "src/book0_presentation",
+    "src/book0_config",
     "src/book0_cli",
     "src/book0_api",
     "src/book0_cli_remote",
