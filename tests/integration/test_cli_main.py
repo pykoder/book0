@@ -1,3 +1,4 @@
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -8,25 +9,135 @@ from book0_presentation.tables import render_table
 from tests.conftest import CALIBRE_LIBRARY_BOOKS
 
 
-def test_run_prints_table_when_library_path_is_the_metadata_db_file(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+def _write_config(config_path: Path, tag: str, library_path: Path) -> None:
+    config_path.write_text(f'[libraries]\n{tag} = "{library_path}"\n')
+
+
+def test_run_prints_table_using_default_library_path_when_tag_is_omitted(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
-    exit_code = run(["--library", str(calibre_metadata_db)])
+    home = tmp_path / "home"
+    default_library_dir = home / "Calibre Library"
+    default_library_dir.mkdir(parents=True)
+    shutil.copy(calibre_metadata_db, default_library_dir / "metadata.db")
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    exit_code = run([])
 
     assert exit_code == 0
     assert capsys.readouterr().out == render_table(CALIBRE_LIBRARY_BOOKS) + "\n"
 
 
-def test_run_prints_table_when_library_path_is_the_library_directory(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+def test_run_reports_missing_library_at_default_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    exit_code = run(["--library", str(calibre_metadata_db.parent)])
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    exit_code = run([])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
+
+
+def test_run_prints_table_when_tag_resolves_via_local_config_file(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", calibre_metadata_db)
+
+    exit_code = run(["--tag", "fiction"])
 
     assert exit_code == 0
     assert capsys.readouterr().out == render_table(CALIBRE_LIBRARY_BOOKS) + "\n"
 
 
-def test_run_reports_empty_library(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+def test_run_prints_table_when_tag_resolves_to_the_library_directory(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", calibre_metadata_db.parent)
+
+    exit_code = run(["--tag", "fiction"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == render_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+
+
+def test_run_prints_table_when_tag_resolves_via_xdg_config_file(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.chdir(tmp_path)
+    config_path = home / ".config" / "book0" / "config.toml"
+    config_path.parent.mkdir(parents=True)
+    _write_config(config_path, "fiction", calibre_metadata_db)
+
+    exit_code = run(["--tag", "fiction"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == render_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+
+
+def test_run_reports_missing_config_file_on_stderr_and_exits_with_status_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    exit_code = run(["--tag", "fiction"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
+
+
+def test_run_reports_unknown_tag_on_stderr_and_exits_with_status_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", tmp_path / "fiction.db")
+
+    exit_code = run(["--tag", "work"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
+
+
+def test_run_reports_empty_library(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
     db_path = tmp_path / "metadata.db"
     connection = sqlite3.connect(db_path)
     try:
@@ -42,29 +153,21 @@ def test_run_reports_empty_library(tmp_path: Path, capsys: pytest.CaptureFixture
         connection.commit()
     finally:
         connection.close()
+    _write_config(tmp_path / ".book0.toml", "empty", db_path)
 
-    exit_code = run(["--library", str(db_path)])
+    exit_code = run(["--tag", "empty"])
 
     assert exit_code == 0
     assert capsys.readouterr().out == "No books found.\n"
 
 
-def test_run_reports_missing_library_on_stderr_and_exits_with_status_1(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-):
-    missing_path = tmp_path / "does-not-exist.db"
-
-    exit_code = run(["--library", str(missing_path)])
-
-    captured = capsys.readouterr()
-    assert exit_code == 1
-    assert captured.out == ""
-    assert captured.err.strip() != ""
-
-
 def test_run_reports_non_calibre_library_on_stderr_and_exits_with_status_1(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
     db_path = tmp_path / "not-calibre.db"
     connection = sqlite3.connect(db_path)
     try:
@@ -72,8 +175,9 @@ def test_run_reports_non_calibre_library_on_stderr_and_exits_with_status_1(
         connection.commit()
     finally:
         connection.close()
+    _write_config(tmp_path / ".book0.toml", "bad", db_path)
 
-    exit_code = run(["--library", str(db_path)])
+    exit_code = run(["--tag", "bad"])
 
     captured = capsys.readouterr()
     assert exit_code == 1
