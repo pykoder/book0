@@ -13,8 +13,15 @@
       "Bash(uv add *)",
       "Bash(uv run fastapi dev *)",
       "Bash(uv run uvicorn *)",
-      "Bash(uv run book0-remote *)",
-      "Bash(uv run book0 *)"
+      "Bash(uv run book0 *)",
+      "Skill(update-config)",
+      "Bash(git checkout *)",
+      "Bash(/Users/kriss/.claude/plugins/cache/superpowers-dev/superpowers/6.2.0/skills/subagent-driven-development/scripts/sdd-workspace *)",
+      "Bash(/Users/kriss/.claude/plugins/cache/superpowers-dev/superpowers/6.2.0/skills/subagent-driven-development/scripts/task-brief *)",
+      "Bash(git -C /Users/kriss/Documents/github/book0 rev-parse --short 873c8921791e7eaf462c0e1787cd08cc76034592)",
+      "Bash(git -C /Users/kriss/Documents/github/book0 rev-parse --short HEAD)",
+      "Bash(git -C /Users/kriss/Documents/github/book0 rev-parse HEAD)",
+      "Bash(git rm *)"
     ]
   }
 }
