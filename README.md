@@ -22,7 +22,7 @@ Every command below is run through `uv run` - see `CLAUDE.md` for why.
 
 ## `book0` - direct CLI
 
-Point it at a library by tag (configured in `~/.config/book0.toml`), or use no flag to read
+Point it at a library by tag (configured via `./.book0.toml`, or `~/.config/book0/config.toml` / `$XDG_CONFIG_HOME/book0/config.toml` as fallback), or use no flag to read
 Calibre's own default library:
 
 ```sh

@@ -22,8 +22,8 @@
   implementation, domain errors) has two consumers of the gateway abstraction -
   `book0_cli` (direct, wires `SqliteLibraryGateway`) and `book0_cli_remote` (wires
   `HttpLibraryGateway`, talks to `book0_api` over REST). Both CLIs render output via the
-  shared `book0_presentation` package. `book0_api` (FastAPI) depends on `book0_core` only and
-  exposes `GET /libraries/{tag}/books`. See `.claude/rules/architecture.md` for the full tree
+  shared `book0_presentation` package. `book0_api` (FastAPI) depends on `book0_core` and
+  `book0_config` only and exposes `GET /libraries/{tag}/books`. See `.claude/rules/architecture.md` for the full tree
   and dependency direction.
 - **Age**: greenfield, no technical debt yet. Keep it that way.
 - **Cross-cutting goal**: every change must reduce or hold technical debt, never increase it,

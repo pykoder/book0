@@ -12,7 +12,7 @@ No task is done without tests. This is not optional.
 
 - Write a **unit test** for every new function/class with no I/O
   (`book0_presentation/tables.py`, `book0_core/models.py`, `book0_core/errors.py`,
-  `book0_api/config.py`'s loader, `book0_api/schemas.py`'s `BookOut.from_book`) - pure logic,
+  `book0_config/config.py`'s loader, `book0_api/schemas.py`'s `BookOut.from_book`) - pure logic,
   no database, no network, no filesystem beyond a temp file the test itself creates.
 - Write an **integration test** for every new/changed `LibraryGateway` method or CLI
   behavior, against a real temporary SQLite file built with a minimal Calibre-shaped schema
