@@ -22,12 +22,13 @@ Every command below is run through `uv run` - see `CLAUDE.md` for why.
 
 ## `book0` - direct CLI
 
-Point it at either the Calibre library folder or the `metadata.db` file itself:
+Point it at a library by tag (configured in `~/.config/book0.toml`), or use no flag to read
+Calibre's own default library:
 
 ```sh
-uv run book0 --library "/path/to/Calibre Library"
+uv run book0 --tag <tag>
 # or
-uv run book0 --library "/path/to/Calibre Library/metadata.db"
+uv run book0                  # reads Calibre's default library
 ```
 
 ```

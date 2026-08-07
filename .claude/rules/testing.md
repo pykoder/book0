@@ -32,8 +32,10 @@ No task is done without tests. This is not optional.
   (missing file, file exists but is not a Calibre library, and for the remote path: the
   matching HTTP status/body, plus an unreachable server) for every path that touches the
   database, the API, or either CLI's error handling.
-- Review every conditional branch and exception path before closing the task - in particular
-  both branches of `book0_cli/main.py::_resolve_db_path` (directory vs. file), both caught
+- Review every conditional branch and exception path before closing the task - in
+  particular `book0_cli/main.py::run`'s tag-resolution branches (`--tag` omitted vs.
+  given, config file found vs. not found, tag present vs. absent in a found config
+  file), both branches of `_resolve_db_path` (directory vs. file), both caught
   exception types in either CLI's `run()`, and all three response branches in
   `book0_api/main.py::list_books` (unknown tag, `LibraryNotFoundError`,
   `NotACalibreLibraryError`).

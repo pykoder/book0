@@ -12,11 +12,12 @@
   with `uv`. No SQLAlchemy, no Alembic - there is no database to migrate, `metadata.db` is
   Calibre's, read-only.
 - **Domain**: two parallel ways to list the books in a Calibre library, both producing
-  identical output. `book0 --library <path>` reads the library's `metadata.db` SQLite file
-  directly (read-only). `book0-remote --server <url> --tag <tag>` talks over HTTP to
-  `book0_api`, a FastAPI service that reads `metadata.db` on the server's behalf for one of
-  several tag-named libraries configured server-side. Single consumer for both: a person
-  running either CLI in a terminal.
+  identical output. `book0 [--tag <tag>]` reads the library's `metadata.db` SQLite file
+  directly (read-only), defaulting to Calibre's own default library if no tag is given.
+  `book0-remote --server <url> --tag <tag>` talks over HTTP to `book0_api`, a FastAPI
+  service that reads `metadata.db` on the server's behalf for one of several tag-named
+  libraries configured server-side. Single consumer for both: a person running either CLI
+  in a terminal.
 - **Architecture**: `book0_core` (domain: `Book`, the `LibraryGateway` `Protocol`, its SQLite
   implementation, domain errors) has two consumers of the gateway abstraction -
   `book0_cli` (direct, wires `SqliteLibraryGateway`) and `book0_cli_remote` (wires
@@ -42,7 +43,7 @@ step.
 | Add a runtime dependency | `uv add <package>` |
 | Add a dev-only dependency | `uv add --dev <package>` |
 | Remove a dependency | `uv remove <package>` |
-| Run the direct CLI | `uv run book0 --library <path>` |
+| Run the direct CLI | `uv run book0 [--tag <tag>]` |
 | Run the API server | `<ENV VARS FOR EACH LIBRARY> BOOK0_API_CONFIG=book0-libraries.toml uv run uvicorn book0_api.asgi:app --reload` |
 | Run the remote CLI | `uv run book0-remote --server <url> --tag <tag>` |
 | Run the test suite | `uv run pytest` |
