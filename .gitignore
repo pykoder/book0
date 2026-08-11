@@ -2,3 +2,5 @@ __pycache__/
 *.py[cod]
 .coverage
 .book0.toml
+.DS_Store
+.claude/settings.local.json
