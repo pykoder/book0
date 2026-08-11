@@ -1,6 +1,6 @@
 import pytest
 
-from book0_core.models import Book
+from book0_core.models import Author, Book
 
 
 def test_book_holds_id_title_authors_and_pubdate():
@@ -23,3 +23,17 @@ def test_book_is_frozen():
 
     with pytest.raises(AttributeError):
         book.title = "Other"
+
+
+def test_author_holds_id_and_name():
+    author = Author(id=1, name="Frank Herbert")
+
+    assert author.id == 1
+    assert author.name == "Frank Herbert"
+
+
+def test_author_is_frozen():
+    author = Author(id=1, name="Frank Herbert")
+
+    with pytest.raises(AttributeError):
+        author.name = "Other"

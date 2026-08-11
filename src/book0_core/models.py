@@ -7,3 +7,9 @@ class Book:
     title: str
     authors: tuple[str, ...]
     pubdate: str | None
+
+
+@dataclass(frozen=True)
+class Author:
+    id: int
+    name: str
