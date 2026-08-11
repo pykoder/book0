@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-from book0_core.models import Author, Book
+from book0_core.models import Author, Book, Publisher
 
 
 class AuthorOut(BaseModel):
@@ -10,6 +10,15 @@ class AuthorOut(BaseModel):
     @classmethod
     def from_author(cls, author: Author) -> "AuthorOut":
         return cls(id=author.id, name=author.name)
+
+
+class PublisherOut(BaseModel):
+    id: int
+    name: str
+
+    @classmethod
+    def from_publisher(cls, publisher: Publisher) -> "PublisherOut":
+        return cls(id=publisher.id, name=publisher.name)
 
 
 class BookOut(BaseModel):

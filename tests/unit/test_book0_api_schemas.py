@@ -1,5 +1,5 @@
-from book0_api.schemas import AuthorOut, BookOut
-from book0_core.models import Author, Book
+from book0_api.schemas import AuthorOut, BookOut, PublisherOut
+from book0_core.models import Author, Book, Publisher
 
 
 def test_from_book_converts_authors_tuple_to_list():
@@ -34,3 +34,11 @@ def test_from_author_converts_author_to_author_out():
     author_out = AuthorOut.from_author(author)
 
     assert author_out == AuthorOut(id=3, name="Neil Gaiman")
+
+
+def test_from_publisher_converts_publisher_to_publisher_out():
+    publisher = Publisher(id=1, name="Ace Books")
+
+    publisher_out = PublisherOut.from_publisher(publisher)
+
+    assert publisher_out == PublisherOut(id=1, name="Ace Books")
