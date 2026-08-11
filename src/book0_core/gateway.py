@@ -1,8 +1,9 @@
 from typing import Protocol
 
-from book0_core.models import Author, Book
+from book0_core.models import Author, Book, Publisher
 
 
 class LibraryGateway(Protocol):
     def list_books(self) -> list[Book]: ...
     def list_authors(self) -> list[Author]: ...
+    def list_publishers(self) -> list[Publisher]: ...

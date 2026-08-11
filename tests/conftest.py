@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from book0_core.models import Author, Book
+from book0_core.models import Author, Book, Publisher
 
 # Books as inserted into the fixture DB, already in the order list_books()
 # is expected to return them (sorted by title).
@@ -25,6 +25,15 @@ CALIBRE_LIBRARY_AUTHORS = [
     Author(id=2, name="J.R.R. Tolkien"),
     Author(id=3, name="Neil Gaiman"),
     Author(id=4, name="Terry Pratchett"),
+]
+
+# Publishers as inserted into the fixture DB, already in the order
+# list_publishers() is expected to return them (sorted by name). The Hobbit
+# (book id 2) is deliberately left unlinked - Calibre allows a book with no
+# publisher set.
+CALIBRE_LIBRARY_PUBLISHERS = [
+    Publisher(id=1, name="Ace Books"),
+    Publisher(id=2, name="Gollancz"),
 ]
 
 
@@ -49,6 +58,15 @@ def calibre_metadata_db(tmp_path: Path) -> Path:
                 book INTEGER NOT NULL,
                 author INTEGER NOT NULL
             );
+            CREATE TABLE publishers (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE books_publishers_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                publisher INTEGER NOT NULL
+            );
             """
         )
         connection.executemany(
@@ -71,6 +89,17 @@ def calibre_metadata_db(tmp_path: Path) -> Path:
         connection.executemany(
             "INSERT INTO books_authors_link (book, author) VALUES (?, ?)",
             [(1, 1), (2, 2), (3, 3), (3, 4)],
+        )
+        connection.executemany(
+            "INSERT INTO publishers (id, name) VALUES (?, ?)",
+            [
+                (1, "Ace Books"),
+                (2, "Gollancz"),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO books_publishers_link (book, publisher) VALUES (?, ?)",
+            [(1, 1), (3, 2)],
         )
         connection.commit()
     finally:
