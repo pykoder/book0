@@ -161,6 +161,60 @@ def test_run_reports_empty_library(
     assert capsys.readouterr().out == "No books found.\n"
 
 
+def test_run_reports_malformed_config_file_on_stderr_and_exits_with_status_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    config_path = tmp_path / ".book0.toml"
+    config_path.write_text("this is not valid toml [[[")
+
+    exit_code = run(["--tag", "fiction"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
+
+
+def test_run_reports_config_file_missing_libraries_table_on_stderr_and_exits_with_status_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    config_path = tmp_path / ".book0.toml"
+    config_path.write_text("[other]\nx = 1\n")
+
+    exit_code = run(["--tag", "fiction"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
+
+
+def test_run_reports_config_file_with_unset_env_var_placeholder_on_stderr_and_exits_with_status_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("NOPE_UNSET_VAR_XYZ", raising=False)
+    config_path = tmp_path / ".book0.toml"
+    config_path.write_text(
+        '[libraries]\nfiction = "${NOPE_UNSET_VAR_XYZ}/metadata.db"\n'
+    )
+
+    exit_code = run(["--tag", "fiction"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
+
+
 def test_run_reports_non_calibre_library_on_stderr_and_exits_with_status_1(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):

@@ -1,5 +1,6 @@
 import argparse
 import sys
+import tomllib
 from pathlib import Path
 
 from book0_cli.config import (
@@ -22,7 +23,13 @@ def _resolve_db_path(library_path: Path) -> Path:
 
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="book0")
-    parser.add_argument("--tag")
+    parser.add_argument(
+        "--tag",
+        help=(
+            "library tag to look up in a .book0.toml config file; "
+            "omit to use Calibre's default library"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.tag is None:
@@ -37,7 +44,13 @@ def run(argv: list[str] | None = None) -> int:
             )
             return 1
 
-        tagged_library_path = load_libraries(config_path).get(args.tag)
+        try:
+            libraries = load_libraries(config_path)
+        except (tomllib.TOMLDecodeError, KeyError) as error:
+            print(f"Invalid book0 config file {config_path}: {error}", file=sys.stderr)
+            return 1
+
+        tagged_library_path = libraries.get(args.tag)
         if tagged_library_path is None:
             print(f"Unknown library tag: {args.tag!r}", file=sys.stderr)
             return 1
