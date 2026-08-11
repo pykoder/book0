@@ -26,6 +26,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _normalize_argv(argv: list[str]) -> list[str]:
+    if argv and argv[0] in ("-h", "--help"):
+        return argv
     if not argv or argv[0] not in _SUBCOMMANDS:
         return ["books", *argv]
     return argv

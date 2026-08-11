@@ -324,3 +324,13 @@ def test_run_lists_books_when_subcommand_is_explicit(
 
     assert exit_code == 0
     assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+
+
+def test_run_help_mentions_the_authors_subcommand(
+    capsys: pytest.CaptureFixture[str],
+):
+    with pytest.raises(SystemExit) as exc_info:
+        run(["--help"])
+
+    assert exc_info.value.code == 0
+    assert "authors" in capsys.readouterr().out
