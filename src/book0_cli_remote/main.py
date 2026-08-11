@@ -5,14 +5,35 @@ import httpx
 
 from book0_cli_remote.http_gateway import HttpLibraryGateway
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
-from book0_presentation.tables import render_book_table
+from book0_presentation.tables import render_author_table, render_book_table
+
+_SUBCOMMANDS = ("books", "authors")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="book0-remote")
+    subparsers = parser.add_subparsers(dest="command")
+
+    books_parser = subparsers.add_parser("books")
+    books_parser.add_argument("--server", required=True)
+    books_parser.add_argument("--tag", required=True)
+
+    authors_parser = subparsers.add_parser("authors")
+    authors_parser.add_argument("--server", required=True)
+    authors_parser.add_argument("--tag", required=True)
+
+    return parser
+
+
+def _normalize_argv(argv: list[str]) -> list[str]:
+    if not argv or argv[0] not in _SUBCOMMANDS:
+        return ["books", *argv]
+    return argv
 
 
 def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="book0-remote")
-    parser.add_argument("--server", required=True)
-    parser.add_argument("--tag", required=True)
-    args = parser.parse_args(argv)
+    raw_argv = sys.argv[1:] if argv is None else argv
+    args = _build_parser().parse_args(_normalize_argv(raw_argv))
 
     owns_client = client is None
     if client is None:
@@ -21,7 +42,10 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
     try:
         gateway = HttpLibraryGateway(client, args.tag)
         try:
-            books = gateway.list_books()
+            if args.command == "authors":
+                print(render_author_table(gateway.list_authors()))
+            else:
+                print(render_book_table(gateway.list_books()))
         except (LibraryNotFoundError, NotACalibreLibraryError) as error:
             print(str(error), file=sys.stderr)
             return 1
@@ -35,7 +59,6 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
         if owns_client:
             client.close()
 
-    print(render_book_table(books))
     return 0
 
 
