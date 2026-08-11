@@ -1,7 +1,15 @@
+from datetime import datetime
+
 from book0_core.models import Book
 
 _HEADERS = ("ID", "Title", "Author(s)", "Pub Date")
 _COLUMN_GAP = "  "
+
+
+def _format_pubdate(pubdate: str | None) -> str:
+    if pubdate is None:
+        return ""
+    return datetime.fromisoformat(pubdate).date().isoformat()
 
 
 def render_table(books: list[Book]) -> str:
@@ -9,7 +17,12 @@ def render_table(books: list[Book]) -> str:
         return "No books found."
 
     rows = [_HEADERS] + [
-        (str(book.id), book.title, ", ".join(book.authors), book.pubdate or "")
+        (
+            str(book.id),
+            book.title,
+            ", ".join(book.authors),
+            _format_pubdate(book.pubdate),
+        )
         for book in books
     ]
     widths = [max(len(row[i]) for row in rows) for i in range(len(_HEADERS))]

@@ -26,3 +26,30 @@ def test_render_table_aligns_columns_with_headers():
 
 def test_render_table_reports_empty_library():
     assert render_table([]) == "No books found."
+
+
+def test_render_table_shows_date_only_when_pubdate_has_a_time_component():
+    books = [
+        Book(
+            id=1,
+            title="Dune",
+            authors=("Frank Herbert",),
+            pubdate="1965-08-01T23:00:00+00:00",
+        ),
+    ]
+
+    output = render_table(books)
+
+    assert output == (
+        "ID  Title  Author(s)      Pub Date\n1   Dune   Frank Herbert  1965-08-01"
+    )
+
+
+def test_render_table_shows_empty_pubdate_when_none():
+    books = [
+        Book(id=1, title="Dune", authors=("Frank Herbert",), pubdate=None),
+    ]
+
+    output = render_table(books)
+
+    assert output == "ID  Title  Author(s)      Pub Date\n1   Dune   Frank Herbert"
