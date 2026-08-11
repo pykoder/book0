@@ -1,8 +1,9 @@
 from datetime import datetime
 
-from book0_core.models import Book
+from book0_core.models import Author, Book
 
-_HEADERS = ("ID", "Title", "Author(s)", "Pub Date")
+_BOOK_HEADERS = ("ID", "Title", "Author(s)", "Pub Date")
+_AUTHOR_HEADERS = ("ID", "Name")
 _COLUMN_GAP = "  "
 
 
@@ -12,11 +13,21 @@ def _format_pubdate(pubdate: str | None) -> str:
     return datetime.fromisoformat(pubdate).date().isoformat()
 
 
-def render_table(books: list[Book]) -> str:
+def _align_rows(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
+    table = [headers] + rows
+    widths = [max(len(row[i]) for row in table) for i in range(len(headers))]
+    lines = [
+        _COLUMN_GAP.join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip()
+        for row in table
+    ]
+    return "\n".join(lines)
+
+
+def render_book_table(books: list[Book]) -> str:
     if not books:
         return "No books found."
 
-    rows = [_HEADERS] + [
+    rows: list[tuple[str, ...]] = [
         (
             str(book.id),
             book.title,
@@ -25,10 +36,12 @@ def render_table(books: list[Book]) -> str:
         )
         for book in books
     ]
-    widths = [max(len(row[i]) for row in rows) for i in range(len(_HEADERS))]
+    return _align_rows(_BOOK_HEADERS, rows)
 
-    lines = [
-        _COLUMN_GAP.join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip()
-        for row in rows
-    ]
-    return "\n".join(lines)
+
+def render_author_table(authors: list[Author]) -> str:
+    if not authors:
+        return "No authors found."
+
+    rows: list[tuple[str, ...]] = [(str(author.id), author.name) for author in authors]
+    return _align_rows(_AUTHOR_HEADERS, rows)

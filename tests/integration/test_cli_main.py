@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from book0_cli.main import run
-from book0_presentation.tables import render_table
+from book0_presentation.tables import render_book_table
 from tests.conftest import CALIBRE_LIBRARY_BOOKS
 
 
@@ -28,7 +28,7 @@ def test_run_prints_table_using_default_library_path_when_tag_is_omitted(
     exit_code = run([])
 
     assert exit_code == 0
-    assert capsys.readouterr().out == render_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
 
 
 def test_run_reports_missing_library_at_default_path(
@@ -60,7 +60,7 @@ def test_run_prints_table_when_tag_resolves_via_local_config_file(
     exit_code = run(["--tag", "fiction"])
 
     assert exit_code == 0
-    assert capsys.readouterr().out == render_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
 
 
 def test_run_prints_table_when_tag_resolves_to_the_library_directory(
@@ -77,7 +77,7 @@ def test_run_prints_table_when_tag_resolves_to_the_library_directory(
     exit_code = run(["--tag", "fiction"])
 
     assert exit_code == 0
-    assert capsys.readouterr().out == render_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
 
 
 def test_run_prints_table_when_tag_resolves_via_xdg_config_file(
@@ -97,7 +97,7 @@ def test_run_prints_table_when_tag_resolves_via_xdg_config_file(
     exit_code = run(["--tag", "fiction"])
 
     assert exit_code == 0
-    assert capsys.readouterr().out == render_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
 
 
 def test_run_reports_missing_config_file_on_stderr_and_exits_with_status_1(

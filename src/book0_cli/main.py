@@ -12,7 +12,7 @@ from book0_cli.config import (
 from book0_config.config import load_libraries
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.sqlite_gateway import SqliteLibraryGateway
-from book0_presentation.tables import render_table
+from book0_presentation.tables import render_book_table
 
 
 def _resolve_db_path(library_path: Path) -> Path:
@@ -65,7 +65,7 @@ def run(argv: list[str] | None = None) -> int:
         print(str(error), file=sys.stderr)
         return 1
 
-    print(render_table(books))
+    print(render_book_table(books))
     return 0
 
 

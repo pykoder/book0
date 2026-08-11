@@ -5,7 +5,7 @@ import httpx
 
 from book0_cli_remote.http_gateway import HttpLibraryGateway
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
-from book0_presentation.tables import render_table
+from book0_presentation.tables import render_book_table
 
 
 def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> int:
@@ -35,7 +35,7 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
         if owns_client:
             client.close()
 
-    print(render_table(books))
+    print(render_book_table(books))
     return 0
 
 

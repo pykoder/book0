@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from book0_api.main import create_app
 from book0_cli_remote.main import run
-from book0_presentation.tables import render_table
+from book0_presentation.tables import render_book_table
 from tests.conftest import CALIBRE_LIBRARY_BOOKS
 
 
@@ -17,7 +17,7 @@ def test_run_prints_table_for_a_known_tag(
     exit_code = run(["--server", "unused", "--tag", "fiction"], client=client)
 
     assert exit_code == 0
-    assert capsys.readouterr().out == render_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
 
 
 def test_run_prints_no_books_found_for_an_unknown_tag(
