@@ -12,7 +12,13 @@ from book0_cli.config import (
 from book0_config.config import load_libraries
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.sqlite_gateway import SqliteLibraryGateway
-from book0_presentation.tables import render_book_table
+from book0_presentation.tables import render_author_table, render_book_table
+
+_SUBCOMMANDS = ("books", "authors")
+_TAG_HELP = (
+    "library tag to look up in a .book0.toml config file; "
+    "omit to use Calibre's default library"
+)
 
 
 def _resolve_db_path(library_path: Path) -> Path:
@@ -21,16 +27,28 @@ def _resolve_db_path(library_path: Path) -> Path:
     return library_path
 
 
-def run(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="book0")
-    parser.add_argument(
-        "--tag",
-        help=(
-            "library tag to look up in a .book0.toml config file; "
-            "omit to use Calibre's default library"
-        ),
-    )
-    args = parser.parse_args(argv)
+    subparsers = parser.add_subparsers(dest="command")
+
+    books_parser = subparsers.add_parser("books")
+    books_parser.add_argument("--tag", help=_TAG_HELP)
+
+    authors_parser = subparsers.add_parser("authors")
+    authors_parser.add_argument("--tag", help=_TAG_HELP)
+
+    return parser
+
+
+def _normalize_argv(argv: list[str]) -> list[str]:
+    if not argv or argv[0] not in _SUBCOMMANDS:
+        return ["books", *argv]
+    return argv
+
+
+def run(argv: list[str] | None = None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else argv
+    args = _build_parser().parse_args(_normalize_argv(raw_argv))
 
     if args.tag is None:
         library_path = default_library_path()
@@ -60,12 +78,14 @@ def run(argv: list[str] | None = None) -> int:
     gateway = SqliteLibraryGateway(db_path)
 
     try:
-        books = gateway.list_books()
+        if args.command == "authors":
+            print(render_author_table(gateway.list_authors()))
+        else:
+            print(render_book_table(gateway.list_books()))
     except (LibraryNotFoundError, NotACalibreLibraryError) as error:
         print(str(error), file=sys.stderr)
         return 1
 
-    print(render_book_table(books))
     return 0
 
 

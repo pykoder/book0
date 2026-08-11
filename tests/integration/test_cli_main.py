@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from book0_cli.main import run
-from book0_presentation.tables import render_book_table
-from tests.conftest import CALIBRE_LIBRARY_BOOKS
+from book0_presentation.tables import render_author_table, render_book_table
+from tests.conftest import CALIBRE_LIBRARY_AUTHORS, CALIBRE_LIBRARY_BOOKS
 
 
 def _write_config(config_path: Path, tag: str, library_path: Path) -> None:
@@ -237,3 +237,90 @@ def test_run_reports_non_calibre_library_on_stderr_and_exits_with_status_1(
     assert exit_code == 1
     assert captured.out == ""
     assert captured.err.strip() != ""
+
+
+def test_run_prints_author_table_using_default_library_path_when_tag_is_omitted(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    home = tmp_path / "home"
+    default_library_dir = home / "Calibre Library"
+    default_library_dir.mkdir(parents=True)
+    shutil.copy(calibre_metadata_db, default_library_dir / "metadata.db")
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    exit_code = run(["authors"])
+
+    assert exit_code == 0
+    assert (
+        capsys.readouterr().out == render_author_table(CALIBRE_LIBRARY_AUTHORS) + "\n"
+    )
+
+
+def test_run_prints_author_table_when_tag_resolves_via_local_config_file(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", calibre_metadata_db)
+
+    exit_code = run(["authors", "--tag", "fiction"])
+
+    assert exit_code == 0
+    assert (
+        capsys.readouterr().out == render_author_table(CALIBRE_LIBRARY_AUTHORS) + "\n"
+    )
+
+
+def test_run_reports_empty_library_for_authors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    db_path = tmp_path / "metadata.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, pubdate TEXT);
+            CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_authors_link (
+                id INTEGER PRIMARY KEY, book INTEGER, author INTEGER
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    _write_config(tmp_path / ".book0.toml", "empty", db_path)
+
+    exit_code = run(["authors", "--tag", "empty"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == "No authors found.\n"
+
+
+def test_run_lists_books_when_subcommand_is_explicit(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    home = tmp_path / "home"
+    default_library_dir = home / "Calibre Library"
+    default_library_dir.mkdir(parents=True)
+    shutil.copy(calibre_metadata_db, default_library_dir / "metadata.db")
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    exit_code = run(["books"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
