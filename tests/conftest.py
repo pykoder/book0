@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from book0_core.models import Book
+from book0_core.models import Author, Book
 
 # Books as inserted into the fixture DB, already in the order list_books()
 # is expected to return them (sorted by title).
@@ -16,6 +16,15 @@ CALIBRE_LIBRARY_BOOKS = [
         pubdate="1990-05-01",
     ),
     Book(id=2, title="The Hobbit", authors=("J.R.R. Tolkien",), pubdate=None),
+]
+
+# Authors as inserted into the fixture DB, already in the order list_authors()
+# is expected to return them (sorted by name).
+CALIBRE_LIBRARY_AUTHORS = [
+    Author(id=1, name="Frank Herbert"),
+    Author(id=2, name="J.R.R. Tolkien"),
+    Author(id=3, name="Neil Gaiman"),
+    Author(id=4, name="Terry Pratchett"),
 ]
 
 

@@ -2,7 +2,7 @@ import sqlite3
 from pathlib import Path
 
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
-from book0_core.models import Book
+from book0_core.models import Author, Book
 
 _LIST_BOOKS_QUERY = """
     SELECT
@@ -16,6 +16,8 @@ _LIST_BOOKS_QUERY = """
     GROUP BY books.id
     ORDER BY books.title
 """
+
+_LIST_AUTHORS_QUERY = "SELECT id, name FROM authors ORDER BY name"
 
 # Calibre stores "no publication date" as a sentinel timestamp (year 101,
 # calibre.utils.date.UNDEFINED_DATE) rather than SQL NULL.
@@ -46,6 +48,19 @@ class SqliteLibraryGateway:
             )
             for row in rows
         ]
+
+    def list_authors(self) -> list[Author]:
+        if not self._db_path.exists():
+            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
+
+        connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+        try:
+            self._check_is_calibre_library(connection)
+            rows = connection.execute(_LIST_AUTHORS_QUERY).fetchall()
+        finally:
+            connection.close()
+
+        return [Author(id=row[0], name=row[1]) for row in rows]
 
     @staticmethod
     def _normalize_pubdate(pubdate: str | None) -> str | None:
