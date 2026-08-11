@@ -1,7 +1,6 @@
 import argparse
 import sys
 import tomllib
-from pathlib import Path
 
 from book0_cli.config import (
     LOCAL_CONFIG_FILENAME,
@@ -19,12 +18,6 @@ _TAG_HELP = (
     "library tag to look up in a .book0.toml config file; "
     "omit to use Calibre's default library"
 )
-
-
-def _resolve_db_path(library_path: Path) -> Path:
-    if library_path.is_dir():
-        return library_path / "metadata.db"
-    return library_path
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -76,8 +69,7 @@ def run(argv: list[str] | None = None) -> int:
             return 1
         library_path = tagged_library_path
 
-    db_path = _resolve_db_path(library_path)
-    gateway = SqliteLibraryGateway(db_path)
+    gateway = SqliteLibraryGateway(library_path)
 
     try:
         if args.command == "authors":

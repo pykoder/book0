@@ -344,7 +344,9 @@ Append to `tests/e2e/test_book0_api_main.py`, adding `CALIBRE_LIBRARY_AUTHORS` t
 `from tests.conftest import CALIBRE_LIBRARY_BOOKS` import line:
 
 ```python
-def test_list_authors_returns_expected_authors_for_a_known_tag(calibre_metadata_db: Path):
+def test_list_authors_returns_expected_authors_for_a_known_tag(
+    calibre_metadata_db: Path,
+):
     app = create_app({"fiction": calibre_metadata_db})
     client = TestClient(app)
 
@@ -495,7 +497,9 @@ Append to `tests/integration/test_http_gateway.py`, adding `CALIBRE_LIBRARY_AUTH
 existing `from tests.conftest import CALIBRE_LIBRARY_BOOKS` import line:
 
 ```python
-def test_list_authors_returns_expected_authors_for_a_known_tag(calibre_metadata_db: Path):
+def test_list_authors_returns_expected_authors_for_a_known_tag(
+    calibre_metadata_db: Path,
+):
     client = _client_for({"fiction": calibre_metadata_db})
     gateway = HttpLibraryGateway(client, "fiction")
 
@@ -587,9 +591,7 @@ class HttpLibraryGateway:
             raise error_type(body["detail"])
         response.raise_for_status()
 
-        return [
-            Author(id=row["id"], name=row["name"]) for row in response.json()
-        ]
+        return [Author(id=row["id"], name=row["name"]) for row in response.json()]
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -848,7 +850,9 @@ def test_run_prints_author_table_using_default_library_path_when_tag_is_omitted(
     exit_code = run(["authors"])
 
     assert exit_code == 0
-    assert capsys.readouterr().out == render_author_table(CALIBRE_LIBRARY_AUTHORS) + "\n"
+    assert (
+        capsys.readouterr().out == render_author_table(CALIBRE_LIBRARY_AUTHORS) + "\n"
+    )
 
 
 def test_run_prints_author_table_when_tag_resolves_via_local_config_file(
@@ -865,7 +869,9 @@ def test_run_prints_author_table_when_tag_resolves_via_local_config_file(
     exit_code = run(["authors", "--tag", "fiction"])
 
     assert exit_code == 0
-    assert capsys.readouterr().out == render_author_table(CALIBRE_LIBRARY_AUTHORS) + "\n"
+    assert (
+        capsys.readouterr().out == render_author_table(CALIBRE_LIBRARY_AUTHORS) + "\n"
+    )
 
 
 def test_run_reports_empty_library_for_authors(
@@ -1065,7 +1071,9 @@ def test_run_prints_author_table_for_a_known_tag(
     )
 
     assert exit_code == 0
-    assert capsys.readouterr().out == render_author_table(CALIBRE_LIBRARY_AUTHORS) + "\n"
+    assert (
+        capsys.readouterr().out == render_author_table(CALIBRE_LIBRARY_AUTHORS) + "\n"
+    )
 
 
 def test_run_prints_no_authors_found_for_an_unknown_tag(

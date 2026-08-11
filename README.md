@@ -17,8 +17,8 @@ Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 uv sync
 ```
 
-This creates `.venv/` and installs both console scripts (`book0`, `book0-remote`) into it.
-Every command below is run through `uv run` - see `CLAUDE.md` for why.
+This creates `.venv/` and installs all three console scripts (`book0`, `book0-remote`,
+`book0-api`) into it. Every command below is run through `uv run` - see `CLAUDE.md` for why.
 
 ## `book0` - direct CLI
 
@@ -47,7 +47,7 @@ ID  Name
 
 ```toml
 [libraries]
-fiction = "/path/to/fiction/metadata.db"
+fiction = "/path/to/fiction"
 ```
 
 `${VAR_NAME}` placeholders are expanded against the environment here too - see the
@@ -64,22 +64,89 @@ here, not as an empty library.
 ### 1. Start the server
 
 `book0_api` serves one or more libraries, each identified by a short tag you choose. The
-mapping from tag to `metadata.db` path is a TOML file pointed to by `BOOK0_API_CONFIG`.
+mapping from tag to library path is a TOML file passed via `--config` - same `[libraries]`
+shape as `book0`'s own `.book0.toml` (see above), so either CLI can read the same file. Each
+value can be a library's directory (`book0_api` appends `metadata.db` itself, just like
+`book0` does) or a `metadata.db` file path directly.
 
 The committed template, `book0-libraries.toml`, holds `${VAR_NAME}` placeholders instead of
 real paths (safe to commit - no real filesystem paths in the repo). Set the env vars it
-references, then start the server:
+references, then start the server with the `book0-api` command:
 
 ```sh
-FICTION_LIBRARY_PATH="/path/to/fiction/metadata.db" \
-WORK_LIBRARY_PATH="/path/to/work/metadata.db" \
-BOOK0_API_CONFIG="book0-libraries.toml" \
-uv run uvicorn book0_api.asgi:app --reload
+FICTION_LIBRARY_PATH="/path/to/fiction" \
+WORK_LIBRARY_PATH="/path/to/work" \
+uv run book0-api --config book0-libraries.toml --reload
 ```
 
 Add a library by adding a line to `book0-libraries.toml` (`tag = "${SOME_ENV_VAR}"`) and
 setting that env var - no code change needed. A tag whose placeholder references an unset
 env var makes the server refuse to start (fail fast, not serve a broken library silently).
+
+By default the server listens on `127.0.0.1:8000` - loopback only, unreachable from other
+machines. `--host` names the *network interface* the process listens on, not a whitelist of
+client addresses: `127.0.0.1` binds to loopback only, `0.0.0.0` binds to every interface on
+the machine (reachable from any address that can route to the host), and a specific interface
+IP binds to just that one. It does not restrict *who* may connect on that interface - see
+"Restricting access" below for that.
+
+```sh
+uv run book0-api --config book0-libraries.toml --host 0.0.0.0 --port 9000
+```
+
+`--reload` enables uvicorn's auto-reload, for development only.
+
+#### Running behind nginx (Unix domain socket)
+
+For a production deployment behind nginx, use `--uds` to have `book0_api` listen on a Unix
+domain socket instead of a TCP host/port (`--uds` and `--host`/`--port` are mutually
+exclusive - pick one):
+
+```sh
+uv run book0-api --config book0-libraries.toml --uds /run/book0-api.sock
+```
+
+Point nginx at that socket:
+
+```nginx
+server {
+    listen 80;
+    server_name books.example.com;
+
+    location / {
+        proxy_pass http://unix:/run/book0-api.sock:/;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+`book0_api` creates the socket file (with permissions letting nginx connect) when it starts.
+If the process was killed rather than shut down cleanly, remove the stale socket file
+(`rm /run/book0-api.sock`) before starting it again, or the bind will fail with "address
+already in use".
+
+#### Restricting access
+
+`book0_api` has no authentication/authorization of its own (by design - see
+`docs/superpowers/specs/2026-08-04-book0-api-and-remote-cli-design.md`'s "out of scope"
+section), and `--host`/`--port`/`--uds` only control which interface or socket it listens on,
+not which clients may connect to it. To allow only specific addresses or a subnet, use the
+layer in front of `book0_api` instead:
+
+- Behind nginx, `allow`/`deny` in the `location`/`server` block:
+
+  ```nginx
+  location / {
+      allow 10.0.0.0/24;
+      allow 203.0.113.5;
+      deny all;
+      proxy_pass http://unix:/run/book0-api.sock:/;
+      proxy_set_header Host $host;
+  }
+  ```
+
+- Without nginx (e.g. `--host 0.0.0.0` directly), restrict the port at the OS firewall
+  (`ufw`, `iptables`, `pf`) to the same specific addresses/subnet instead.
 
 ### 2. Run the CLI against it
 

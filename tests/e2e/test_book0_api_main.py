@@ -25,6 +25,26 @@ def test_list_books_returns_expected_books_for_a_known_tag(calibre_metadata_db: 
     ]
 
 
+def test_list_books_resolves_metadata_db_when_configured_path_is_a_directory(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db.parent})
+    client = TestClient(app)
+
+    response = client.get("/libraries/fiction/books")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": book.id,
+            "title": book.title,
+            "authors": list(book.authors),
+            "pubdate": book.pubdate,
+        }
+        for book in CALIBRE_LIBRARY_BOOKS
+    ]
+
+
 def test_list_books_returns_empty_list_for_an_unknown_tag(calibre_metadata_db: Path):
     app = create_app({"fiction": calibre_metadata_db})
     client = TestClient(app)

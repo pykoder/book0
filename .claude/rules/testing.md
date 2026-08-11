@@ -36,10 +36,12 @@ No task is done without tests. This is not optional.
 - Review every conditional branch and exception path before closing the task - in
   particular `book0_cli/main.py::run`'s tag-resolution branches (`--tag` omitted vs.
   given, config file found vs. not found, tag present vs. absent in a found config
-  file), both branches of `_resolve_db_path` (directory vs. file), both caught
-  exception types in either CLI's `run()`, and all three response branches in
+  file), both branches of `SqliteLibraryGateway.__init__`'s directory-vs-file resolution,
+  both caught exception types in either CLI's `run()`, all three response branches in
   `book0_api/main.py::list_books` (unknown tag, `LibraryNotFoundError`,
-  `NotACalibreLibraryError`).
+  `NotACalibreLibraryError`), and `book0_api/cli.py::run`'s argument branches (`--config`
+  missing, `--reload` given vs. omitted, `--host`/`--port` given vs. defaulted, `--uds` given
+  alone vs. combined with `--host`/`--port` - the latter must be rejected).
 
 ## Modified existing code
 

@@ -13,6 +13,7 @@ dependencies = [
 [project.scripts]
 book0 = "book0_cli.main:main"
 book0-remote = "book0_cli_remote.main:main"
+book0-api = "book0_api.cli:main"
 
 [build-system]
 requires = ["hatchling"]

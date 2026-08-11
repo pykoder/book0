@@ -25,8 +25,10 @@ _UNDEFINED_PUBDATE_PREFIX = "0101-01-01"
 
 
 class SqliteLibraryGateway:
-    def __init__(self, db_path: Path) -> None:
-        self._db_path = db_path
+    def __init__(self, library_path: Path) -> None:
+        self._db_path = (
+            library_path / "metadata.db" if library_path.is_dir() else library_path
+        )
 
     def list_books(self) -> list[Book]:
         if not self._db_path.exists():

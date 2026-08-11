@@ -11,7 +11,7 @@ Before touching a file, identify which package it belongs to. Conventions differ
 ## Current layout
 
 ```
-book0-libraries.toml            # committed template for BOOK0_API_CONFIG: ${VAR_NAME}
+book0-libraries.toml            # committed template for book0-api --config: ${VAR_NAME}
                                   # placeholders, never real paths - see book0_config/config.py below
 src/
 ├── book0_core/
@@ -20,7 +20,9 @@ src/
 │   ├── errors.py                # LibraryNotFoundError, NotACalibreLibraryError
 │   ├── gateway.py                # LibraryGateway(Protocol): list_books() -> list[Book],
 │                                    # list_authors() -> list[Author]
-│   └── sqlite_gateway.py          # SqliteLibraryGateway: reads metadata.db read-only
+│   └── sqlite_gateway.py          # SqliteLibraryGateway: reads metadata.db read-only; resolves
+│                                    # a configured directory to <directory>/metadata.db itself,
+│                                    # so callers may pass either a library directory or a db file
 ├── book0_presentation/
 │   └── tables.py                  # render_book_table(list[Book]) -> str, render_author_table(list[Author]) -> str,
 │                                    # aligned plain-text tables
@@ -33,7 +35,13 @@ src/
 │                                    # the default), --tag TAG (optional) -> SqliteLibraryGateway
 ├── book0_api/
 │   ├── main.py                    # create_app(libraries: dict[str, Path]) -> FastAPI
-│   ├── asgi.py                    # `app` wired from BOOK0_API_CONFIG - the real uvicorn entry point
+│   ├── asgi.py                    # `app` wired from CONFIG_ENV_VAR (BOOK0_API_CONFIG) - the
+│   │                                # real uvicorn import target ("book0_api.asgi:app")
+│   ├── cli.py                     # `book0-api` entry point: --config PATH (required), --reload,
+│   │                                # --host/--port (default 127.0.0.1:8000) OR --uds PATH (a
+│   │                                # Unix domain socket, e.g. for nginx via proxy_pass to
+│   │                                # unix:PATH) - mutually exclusive with --host/--port -> sets
+│   │                                # BOOK0_API_CONFIG, then uvicorn.run(...)
 │   └── schemas.py                 # BookOut: id, title, authors: list[str], pubdate;
 │                                    # AuthorOut: id, name
 └── book0_cli_remote/
@@ -77,9 +85,13 @@ their own fixture DB.
   vs. `--server URL --tag TAG`, both required). Neither CLI shares a run loop with the other -
   there is no shared run-loop function between them. That was a deliberate choice, not an
   oversight, so do not "DRY them up" into one without a task that asks for it.
-- Code that talks to `metadata.db` (SQL, `sqlite3.connect`, schema assumptions) lives only in
-  `book0_core/sqlite_gateway.py`. Nothing outside it should open a connection or write SQL -
-  including `book0_api`, which calls `SqliteLibraryGateway` exactly like `book0_cli` does.
+- Code that talks to `metadata.db` (SQL, `sqlite3.connect`, schema assumptions, the
+  `metadata.db` filename itself) lives only in `book0_core/sqlite_gateway.py`. Nothing outside
+  it should open a connection, write SQL, or resolve a library directory to its db file -
+  including `book0_api`, which calls `SqliteLibraryGateway` exactly like `book0_cli` does, and
+  both CLIs' config files (`.book0.toml`, `book0-libraries.toml`) may name either a library
+  directory or a `metadata.db` file directly - `SqliteLibraryGateway.__init__` resolves that,
+  not the callers.
 - Anything that consumes books (either CLI, a future third consumer) depends on the
   `LibraryGateway` Protocol, not on a concrete implementation, so a gateway can be substituted
   without changing the caller.

@@ -95,6 +95,14 @@ def test_non_calibre_sqlite_file_raises_not_a_calibre_library_error(tmp_path: Pa
         gateway.list_books()
 
 
+def test_list_books_resolves_metadata_db_when_given_a_directory(
+    calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(calibre_metadata_db.parent)
+
+    assert gateway.list_books() == CALIBRE_LIBRARY_BOOKS
+
+
 def test_list_authors_returns_authors_sorted_by_name(calibre_metadata_db: Path):
     gateway = SqliteLibraryGateway(calibre_metadata_db)
 
