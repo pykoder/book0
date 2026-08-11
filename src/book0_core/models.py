@@ -13,3 +13,9 @@ class Book:
 class Author:
     id: int
     name: str
+
+
+@dataclass(frozen=True)
+class Publisher:
+    id: int
+    name: str
