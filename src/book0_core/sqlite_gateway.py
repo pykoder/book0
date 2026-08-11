@@ -17,6 +17,10 @@ _LIST_BOOKS_QUERY = """
     ORDER BY books.title
 """
 
+# Calibre stores "no publication date" as a sentinel timestamp (year 101,
+# calibre.utils.date.UNDEFINED_DATE) rather than SQL NULL.
+_UNDEFINED_PUBDATE_PREFIX = "0101-01-01"
+
 
 class SqliteLibraryGateway:
     def __init__(self, db_path: Path) -> None:
@@ -38,10 +42,16 @@ class SqliteLibraryGateway:
                 id=row[0],
                 title=row[1],
                 authors=tuple(row[2].split(", ")) if row[2] else (),
-                pubdate=row[3],
+                pubdate=self._normalize_pubdate(row[3]),
             )
             for row in rows
         ]
+
+    @staticmethod
+    def _normalize_pubdate(pubdate: str | None) -> str | None:
+        if pubdate is not None and pubdate.startswith(_UNDEFINED_PUBDATE_PREFIX):
+            return None
+        return pubdate
 
     def _check_is_calibre_library(self, connection: sqlite3.Connection) -> None:
         table = connection.execute(

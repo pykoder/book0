@@ -36,6 +36,44 @@ def test_list_books_opens_the_database_read_only(
     assert captured_calls == [(f"file:{calibre_metadata_db}?mode=ro", True)]
 
 
+def test_calibre_undefined_pubdate_sentinel_is_reported_as_none(tmp_path: Path):
+    # Calibre stores "no publication date" as a sentinel timestamp (year 101,
+    # calibre.utils.date.UNDEFINED_DATE) rather than SQL NULL.
+    db_path = tmp_path / "metadata.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE books (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                pubdate TEXT
+            );
+            CREATE TABLE authors (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE books_authors_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                author INTEGER NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO books (id, title, pubdate) VALUES (?, ?, ?)",
+            (1, "Mystery Book", "0101-01-01T00:00:00+00:00"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    gateway = SqliteLibraryGateway(db_path)
+
+    books = gateway.list_books()
+
+    assert books[0].pubdate is None
+
+
 def test_missing_file_raises_library_not_found_error(tmp_path: Path):
     gateway = SqliteLibraryGateway(tmp_path / "does-not-exist.db")
 
