@@ -1,5 +1,5 @@
-from book0_api.schemas import BookOut
-from book0_core.models import Book
+from book0_api.schemas import AuthorOut, BookOut
+from book0_core.models import Author, Book
 
 
 def test_from_book_converts_authors_tuple_to_list():
@@ -26,3 +26,11 @@ def test_from_book_keeps_none_pubdate():
     book_out = BookOut.from_book(book)
 
     assert book_out.pubdate is None
+
+
+def test_from_author_converts_author_to_author_out():
+    author = Author(id=3, name="Neil Gaiman")
+
+    author_out = AuthorOut.from_author(author)
+
+    assert author_out == AuthorOut(id=3, name="Neil Gaiman")
