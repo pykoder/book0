@@ -43,8 +43,8 @@ paths:
     Pydantic earns its place: it is the actual wire format for `GET /libraries/{tag}/books`,
     which is the first (and so far only) real HTTP boundary in this project.
 - Use `Path` (not `str`) for filesystem paths in function signatures; convert at the
-  outermost layer only (`argparse.add_argument(..., type=Path)`, `Path(os.environ[...])` in
-  `book0_api/asgi.py`).
+  outermost layer only (`Path(os.environ[...])` in `book0_api/asgi.py`,
+  `Path.home() / "Calibre Library"` in `book0_cli/config.py::default_library_path`).
 
 ## SQLite access
 

@@ -34,6 +34,13 @@ src/
 └── book0_cli_remote/
     ├── main.py                    # `book0-remote` entry point: --server URL --tag TAG -> HttpLibraryGateway
     └── http_gateway.py             # HttpLibraryGateway: implements LibraryGateway over HTTP
+tests/
+├── unit/                          # book0_presentation, book0_core models/errors, book0_config's
+│                                    # loader, book0_api's schemas - no I/O, no network
+├── integration/                    # SqliteLibraryGateway and HttpLibraryGateway against a real
+│                                    # temp SQLite file / a real FastAPI app (via TestClient),
+│                                    # plus both CLIs' `run()` end to end
+└── e2e/                            # book0_api's routes via FastAPI's TestClient
 ```
 
 `tests/conftest.py` holds the shared Calibre-shaped SQLite fixture (`calibre_metadata_db`) and
@@ -60,7 +67,9 @@ tests all build on it rather than each defining their own fixture DB.
   depends on the other. Each has its own full `main.py`; the only thing that differs between
   them, behaviorally, is which `LibraryGateway` implementation gets constructed and which
   flags feed it (`--tag TAG`, optional and defaulting to Calibre's own default library path,
-  vs. `--server URL --tag TAG`, both required).
+  vs. `--server URL --tag TAG`, both required). Neither CLI shares a run loop with the other -
+  there is no shared run-loop function between them. That was a deliberate choice, not an
+  oversight, so do not "DRY them up" into one without a task that asks for it.
 - Code that talks to `metadata.db` (SQL, `sqlite3.connect`, schema assumptions) lives only in
   `book0_core/sqlite_gateway.py`. Nothing outside it should open a connection or write SQL -
   including `book0_api`, which calls `SqliteLibraryGateway` exactly like `book0_cli` does.

@@ -28,7 +28,8 @@ No task is done without tests. This is not optional.
   work for this - `ASGITransport` only implements the async transport interface, and both
   gateways are sync.
 - Cover the nominal case, the boundary cases (empty library, an unconfigured tag treated as
-  an empty library, `NULL` `pubdate`, a book with multiple authors), and the error cases
+  an empty library (book0_api/book0-remote only - book0_cli's --tag reports an unconfigured
+  tag as an error), `NULL` `pubdate`, a book with multiple authors), and the error cases
   (missing file, file exists but is not a Calibre library, and for the remote path: the
   matching HTTP status/body, plus an unreachable server) for every path that touches the
   database, the API, or either CLI's error handling.

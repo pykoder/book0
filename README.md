@@ -36,8 +36,21 @@ ID  Title       Author(s)      Pub Date
 1   Dune        Frank Herbert  1965-08-01
 ```
 
+`.book0.toml` (or the XDG fallback) maps tags to library paths, same shape as
+`book0-libraries.toml`:
+
+```toml
+[libraries]
+fiction = "/path/to/fiction/metadata.db"
+```
+
+`${VAR_NAME}` placeholders are expanded against the environment here too - see the
+`book0-remote` + `book0_api` section below for the full explanation.
+
 An empty library prints `No books found.`. A missing path or a file that isn't a Calibre
-library prints a one-line error to stderr and exits with status 1.
+library, no config file found for a given `--tag`, or a config file found that doesn't list
+that tag, all print a one-line error to stderr and exit with status 1. Unlike `book0-remote`
+(below), an unconfigured `--tag` is treated as an error here, not as an empty library.
 
 ## `book0-remote` + `book0_api` - HTTP-backed CLI
 

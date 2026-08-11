@@ -16,8 +16,8 @@ Before any change, fix, or addition, always:
      reconstructed in `book0_cli_remote/http_gateway.py`;
    - how existing tests are written (fixtures in `tests/conftest.py`, `capsys` for CLI
      output, `TestClient` for the API/remote-gateway path);
-   - the dependency direction (`architecture.md`'s diagram - both CLIs and the API depend on
-     `book0_core`, never the reverse; neither CLI depends on the other).
+   - the dependency direction (`architecture.md`'s dependency-direction section - both CLIs
+     and the API depend on `book0_core`, never the reverse; neither CLI depends on the other).
 2. **Assess the quality of the touched zone**, then apply the zone rule from
    `architecture.md` (align strictly - this project has no legacy zone yet).
 3. **Never hallucinate a convention.** If the existing code is ambiguous or contradictory across
@@ -28,8 +28,9 @@ Before any change, fix, or addition, always:
 ### Debug
 1. Reproduce the bug (a failing test when possible) before looking for the cause.
 2. Identify which package it lives in: `book0_core` (wrong query, wrong error type),
-   `book0_api` (wrong status/body mapping), `book0_cli_remote` (wrong error reconstruction,
-   wrong request), or either CLI's `main.py` (path/flag resolution, formatting, exit code).
+   `book0_api` (wrong status/body mapping), `book0_config` (wrong tag-to-path resolution or
+   TOML parsing), `book0_cli_remote` (wrong error reconstruction, wrong request), or either
+   CLI's `main.py` (path/flag resolution, formatting, exit code).
 3. Find the root cause, not just the symptom.
 4. Fix at the lowest coherent level. Do not patch a CLI's `main.py` to mask a bug in a
    gateway, and do not patch `HttpLibraryGateway` to mask a bug in `book0_api`.
