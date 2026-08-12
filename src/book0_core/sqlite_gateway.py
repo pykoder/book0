@@ -45,7 +45,7 @@ class SqliteLibraryGateway:
 
         return [
             Book(
-                id=row[0],
+                id=str(row[0]),
                 title=row[1],
                 authors=tuple(row[2].split(", ")) if row[2] else (),
                 pubdate=self._normalize_pubdate(row[3]),
@@ -64,7 +64,7 @@ class SqliteLibraryGateway:
         finally:
             connection.close()
 
-        return [Author(id=row[0], name=row[1]) for row in rows]
+        return [Author(id=str(row[0]), name=row[1]) for row in rows]
 
     def list_publishers(self) -> list[Publisher]:
         if not self._db_path.exists():
@@ -77,7 +77,7 @@ class SqliteLibraryGateway:
         finally:
             connection.close()
 
-        return [Publisher(id=row[0], name=row[1]) for row in rows]
+        return [Publisher(id=str(row[0]), name=row[1]) for row in rows]
 
     @staticmethod
     def _normalize_pubdate(pubdate: str | None) -> str | None:
