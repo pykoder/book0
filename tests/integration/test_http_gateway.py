@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from book0_api.main import create_app
 from book0_cli_remote.http_gateway import HttpLibraryGateway
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
+from book0_core.gateway import LibraryGateway
 from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
@@ -134,3 +135,12 @@ def test_list_publishers_raises_not_a_calibre_library_error(tmp_path: Path):
 
     with pytest.raises(NotACalibreLibraryError):
         gateway.list_publishers()
+
+
+def test_http_gateway_satisfies_the_library_gateway_protocol(
+    calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": calibre_metadata_db})
+    gateway: LibraryGateway = HttpLibraryGateway(client, "fiction")
+
+    assert gateway.list_publishers() == CALIBRE_LIBRARY_PUBLISHERS

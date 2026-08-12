@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
+from book0_core.gateway import LibraryGateway
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
@@ -211,3 +212,11 @@ def test_non_calibre_sqlite_file_raises_not_a_calibre_library_error_for_publishe
 
     with pytest.raises(NotACalibreLibraryError):
         gateway.list_publishers()
+
+
+def test_sqlite_gateway_satisfies_the_library_gateway_protocol(
+    calibre_metadata_db: Path,
+):
+    gateway: LibraryGateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    assert gateway.list_publishers() == CALIBRE_LIBRARY_PUBLISHERS
