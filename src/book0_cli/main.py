@@ -11,9 +11,13 @@ from book0_cli.config import (
 from book0_config.config import load_libraries
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.sqlite_gateway import SqliteLibraryGateway
-from book0_presentation.tables import render_author_table, render_book_table
+from book0_presentation.tables import (
+    render_author_table,
+    render_book_table,
+    render_publisher_table,
+)
 
-_SUBCOMMANDS = ("books", "authors")
+_SUBCOMMANDS = ("books", "authors", "publishers")
 _TAG_HELP = (
     "library tag to look up in a .book0.toml config file; "
     "omit to use Calibre's default library"
@@ -29,6 +33,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     authors_parser = subparsers.add_parser("authors")
     authors_parser.add_argument("--tag", help=_TAG_HELP)
+
+    publishers_parser = subparsers.add_parser("publishers")
+    publishers_parser.add_argument("--tag", help=_TAG_HELP)
 
     return parser
 
@@ -74,6 +81,8 @@ def run(argv: list[str] | None = None) -> int:
     try:
         if args.command == "authors":
             print(render_author_table(gateway.list_authors()))
+        elif args.command == "publishers":
+            print(render_publisher_table(gateway.list_publishers()))
         else:
             print(render_book_table(gateway.list_books()))
     except (LibraryNotFoundError, NotACalibreLibraryError) as error:
