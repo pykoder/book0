@@ -24,8 +24,8 @@
   `HttpLibraryGateway`, talks to `book0_api` over REST). Both CLIs render output via the
   shared `book0_presentation` package. `book0_cli` and `book0_api` (FastAPI) also both depend
   on `book0_config` for tag-to-path TOML resolution; `book0_api` exposes
-  `GET /libraries/{tag}/books`. See `.claude/rules/architecture.md` for the full tree and
-  dependency direction.
+  `GET /libraries/{tag}/{books,authors,publishers}`. See `.claude/rules/architecture.md` for
+  the full tree and dependency direction.
 - **Age**: greenfield, no technical debt yet. Keep it that way.
 - **Cross-cutting goal**: every change must reduce or hold technical debt, never increase it,
   even under deadline pressure.

@@ -37,11 +37,12 @@ No task is done without tests. This is not optional.
   particular `book0_cli/main.py::run`'s tag-resolution branches (`--tag` omitted vs.
   given, config file found vs. not found, tag present vs. absent in a found config
   file), both branches of `SqliteLibraryGateway.__init__`'s directory-vs-file resolution,
-  both caught exception types in either CLI's `run()`, all three response branches in
-  `book0_api/main.py::list_books` (unknown tag, `LibraryNotFoundError`,
-  `NotACalibreLibraryError`), and `book0_api/cli.py::run`'s argument branches (`--config`
-  missing, `--reload` given vs. omitted, `--host`/`--port` given vs. defaulted, `--uds` given
-  alone vs. combined with `--host`/`--port` - the latter must be rejected).
+  both caught exception types in either CLI's `run()`, and all three response branches in
+  each of `book0_api/main.py`'s routes (`list_books`, `list_authors`, `list_publishers`
+  today) - unknown tag, `LibraryNotFoundError`, `NotACalibreLibraryError` - and
+  `book0_api/cli.py::run`'s argument branches (`--config` missing, `--reload` given vs.
+  omitted, `--host`/`--port` given vs. defaulted, `--uds` given alone vs. combined with
+  `--host`/`--port` - the latter must be rejected).
 
 ## Modified existing code
 

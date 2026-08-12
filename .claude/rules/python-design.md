@@ -19,9 +19,10 @@ paths:
   `SqliteLibraryGateway` (a 404 with an `"error": "LibraryNotFoundError"` body becomes a
   `LibraryNotFoundError`, not a generic `HTTPStatusError`) - that substitutability is the
   entire point of the abstraction, not an incidental detail.
-- Prefer one small `Protocol` (`LibraryGateway` has a single method) over a catch-all
-  interface. Do not add methods to it "for later" - extend it only when a task needs them,
-  and when you do, every existing implementation must grow the same method.
+- Prefer a small, focused `Protocol` (`LibraryGateway` grows one method per listing type, not
+  a catch-all interface) over one interface that tries to do everything. Do not add methods
+  to it "for later" - extend it only when a task needs them, and when you do, every existing
+  implementation must grow the same method.
 
 ## KISS / DRY / YAGNI
 
