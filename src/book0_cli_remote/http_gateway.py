@@ -1,7 +1,7 @@
 import httpx
 
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
-from book0_core.models import Author, Book
+from book0_core.models import Author, Book, Publisher
 
 _ERROR_TYPES = {
     "LibraryNotFoundError": LibraryNotFoundError,
@@ -43,3 +43,14 @@ class HttpLibraryGateway:
         response.raise_for_status()
 
         return [Author(id=row["id"], name=row["name"]) for row in response.json()]
+
+    def list_publishers(self) -> list[Publisher]:
+        response = self._client.get(f"/libraries/{self._tag}/publishers")
+
+        if response.status_code in (404, 500):
+            body = response.json()
+            error_type = _ERROR_TYPES[body["error"]]
+            raise error_type(body["detail"])
+        response.raise_for_status()
+
+        return [Publisher(id=row["id"], name=row["name"]) for row in response.json()]
