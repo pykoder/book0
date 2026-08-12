@@ -56,9 +56,10 @@ class BookDetailsResult:
   optional fields on `BookDetails` that could drift out of sync (an `index` set while `series`
   is `None`).
 - `index` is `str`, not Calibre's native `float` (`series_index`) — Calibre's float
-  representation is a poor fit for series numbering (not a true continuum: entries like "0.5"
-  or non-numeric conventions exist in the wild) and a string leaves room to fix that
-  representation later without another type migration.
+  representation is a poor fit for series numbering (not a true continuum: real-world
+  numbering includes things like "7.3" for a book that sits between two others in a series, or
+  non-numeric conventions entirely), and a string leaves room to fix that representation later
+  without another type migration.
 - `publisher`/`series` are `None` when the book has no linked publisher/series — Calibre allows
   both to be unset.
 - Deliberately out of scope for now: ISBN (Calibre has both a legacy `books.isbn` column and a
@@ -77,18 +78,33 @@ def get_book_details(self, ids: list[str]) -> BookDetailsResult: ...
 
 - **`SqliteLibraryGateway.get_book_details(ids)`** — same existence/schema checks
   (`LibraryNotFoundError`, `NotACalibreLibraryError`) as every other method. An empty `ids`
-  list is valid and returns `BookDetailsResult((), ())` without querying. The query joins
-  `books` against `books_authors_link`/`authors` and `books_tags_link`/`tags` (both
-  many-to-many, aggregated per book — same `GROUP_CONCAT` pattern `list_books` already uses
-  for authors), and against `books_publishers_link`/`publishers` and
-  `books_series_link`/`series` (both treated as at-most-one per book, matching the existing
-  `list_publishers`/Publishers-feature convention, even though Calibre's schema technically
-  allows more). `series_index` comes directly off the `books` row, not a link table. Exact SQL
-  (subquery shape, `GROUP_CONCAT` vs. correlated subqueries) is a plan-level decision, not
-  pinned down here.
-  - Rows are keyed by id and then reassembled into `books` **in the order `ids` was passed** —
-    SQL's `WHERE id IN (...)` gives no ordering guarantee, so the gateway reorders in Python.
-  - `missing_ids` is every requested id with no matching row, in the order requested.
+  list is valid; the implementation must not special-case an early return for it (e.g. `if not
+  ids: return BookDetailsResult((), ())` before ever touching the database) — `ids` is
+  expected to eventually sit alongside other, not-yet-designed parameters (a future
+  "suggest a book" mode is one candidate raised during design), and an early return keyed only
+  on `ids` being empty would need to be unwound once those parameters exist. For now the
+  method's only parameter stays `ids: list[str]`; this is a forward note about implementation
+  shape, not a signature change today. `WHERE id IN (...)` naturally returns zero rows for an
+  empty `ids` list regardless, so this has no behavioral effect yet. The query joins `books`
+  against `books_authors_link`/`authors` and `books_tags_link`/`tags` (both many-to-many,
+  aggregated per book — same `GROUP_CONCAT` pattern `list_books` already uses for authors),
+  and against `books_publishers_link`/`publishers` and `books_series_link`/`series` (both
+  treated as at-most-one per book, matching the existing `list_publishers`/Publishers-feature
+  convention, even though Calibre's schema technically allows more). `series_index` comes
+  directly off the `books` row, not a link table. Exact SQL (subquery shape, `GROUP_CONCAT`
+  vs. correlated subqueries) is a plan-level decision, not pinned down here.
+  - **No ordering is guaranteed anywhere** — not in the SQL, not by the gateway reassembling
+    results, not in presentation. Earlier drafts of this design required `books` to come back
+    in the order `ids` was requested; that requirement is deliberately dropped as premature
+    (YAGNI) — nothing today needs it, and enforcing an order (in SQL via `ORDER BY`, or by
+    reordering in Python) is its own decision to make later, once something actually depends
+    on a specific order. `books` and `missing_ids` come back in whatever order the
+    implementation naturally produces, which may change between calls or versions of the
+    query. Tests must account for this themselves (compare as a set, or sort before
+    comparing) rather than asserting positionally.
+  - `missing_ids` is every requested id with no matching row — `tuple[str, ...]`, matching
+    every other collection type in this codebase (`Book.authors`, `BookDetails.tags`, etc. are
+    all tuples too), with no ordering guarantee (see above).
 
 - **`HttpLibraryGateway.get_book_details(ids)`** — `POST /libraries/{tag}/books/detail` with
   JSON body `{"ids": [...]}`, same 404/500 error reconstruction as every other method.
@@ -122,7 +138,8 @@ str`:
   covering id, title, authors, publisher, series (name + index), tags, pub date — followed by
   a trailing "Missing ids: ..." line if any were missing.
 - Authors and tags are joined with `" & "` per the cell (not `", "` like the existing books
-  table), to leave room for a comma to mean something else if a future column needs it. This
+  table), to leave room for a comma to mean something else if a future column needs it (e.g.
+  Calibre-style "Lastname, Firstname" author formatting, which uses a comma internally). This
   separator convention is explicitly expected to be revisited later, including possibly
   choosing a different separator per field (authors vs. tags) — not settled permanently here.
 
@@ -168,10 +185,12 @@ future subcommands, not something enforced by shared code today.
 - Unit: `Series`, `SeriesItem`, `BookDetails`, `BookDetailsResult`, the new API schemas'
   `from_*` classmethods, `render_book_details_table` (empty, found books, missing ids, mixed).
 - Integration: `SqliteLibraryGateway.get_book_details` (nominal with all fields populated, a
-  book missing publisher/series/tags, requested-order preservation, missing ids, empty `ids`
-  list, missing file, non-Calibre file), `HttpLibraryGateway.get_book_details` (same cases via
-  the real route), both CLIs' `run()` for `books-detail` (including the `--ids` comma-parsing,
-  a non-numeric id landing in `missing_ids`, and the missing-`--ids`-value usage error).
+  book missing publisher/series/tags, missing ids, empty `ids` list, missing file, non-Calibre
+  file), `HttpLibraryGateway.get_book_details` (same cases via the real route), both CLIs'
+  `run()` for `books-detail` (including the `--ids` comma-parsing, a non-numeric id landing in
+  `missing_ids`, and the missing-`--ids`-value usage error). Every test comparing `books`/
+  `missing_ids` against expected data does so order-independently (set comparison or sorting
+  both sides before comparing) — no test may rely on either collection's return order.
 - E2E: the new route (nominal, unconfigured tag, both error mappings, ids partially found).
 
 ## Out of scope
