@@ -16,23 +16,26 @@ book0-libraries.toml            # committed template for book0-api --config: ${V
 src/
 ├── book0_core/
 │   ├── models.py               # Book: frozen dataclass (id, title, authors, pubdate);
-│                                  # Author: frozen dataclass (id, name)
+│                                  # Author: frozen dataclass (id, name); Publisher: frozen
+│                                  # dataclass (id, name)
 │   ├── errors.py                # LibraryNotFoundError, NotACalibreLibraryError
 │   ├── gateway.py                # LibraryGateway(Protocol): list_books() -> list[Book],
-│                                    # list_authors() -> list[Author]
+│                                    # list_authors() -> list[Author],
+│                                    # list_publishers() -> list[Publisher]
 │   └── sqlite_gateway.py          # SqliteLibraryGateway: reads metadata.db read-only; resolves
 │                                    # a configured directory to <directory>/metadata.db itself,
 │                                    # so callers may pass either a library directory or a db file
 ├── book0_presentation/
 │   └── tables.py                  # render_book_table(list[Book]) -> str, render_author_table(list[Author]) -> str,
-│                                    # aligned plain-text tables
+│                                    # render_publisher_table(list[Publisher]) -> str, aligned plain-text tables
 ├── book0_config/
 │   └── config.py                  # load_libraries(path) -> dict[str, Path], reads a TOML file;
 │                                    # shared by book0_cli and book0_api
 ├── book0_cli/
 │   ├── config.py                  # default_library_path(), xdg_config_path(), find_config_file()
-│   └── main.py                    # `book0` entry point: `books`/`authors` subcommands (books is
-│                                    # the default), --tag TAG (optional) -> SqliteLibraryGateway
+│   └── main.py                    # `book0` entry point: `books`/`authors`/`publishers`
+│                                    # subcommands (books is the default), --tag TAG (optional)
+│                                    # -> SqliteLibraryGateway
 ├── book0_api/
 │   ├── main.py                    # create_app(libraries: dict[str, Path]) -> FastAPI
 │   ├── asgi.py                    # `app` wired from CONFIG_ENV_VAR (BOOK0_API_CONFIG) - the
@@ -43,10 +46,11 @@ src/
 │   │                                # unix:PATH) - mutually exclusive with --host/--port -> sets
 │   │                                # BOOK0_API_CONFIG, then uvicorn.run(...)
 │   └── schemas.py                 # BookOut: id, title, authors: list[str], pubdate;
-│                                    # AuthorOut: id, name
+│                                    # AuthorOut: id, name; PublisherOut: id, name
 └── book0_cli_remote/
-    ├── main.py                    # `book0-remote` entry point: `books`/`authors` subcommands
-    │                                (books is the default), --server URL --tag TAG -> HttpLibraryGateway
+    ├── main.py                    # `book0-remote` entry point: `books`/`authors`/`publishers`
+    │                                subcommands (books is the default), --server URL --tag TAG
+    │                                -> HttpLibraryGateway
     └── http_gateway.py             # HttpLibraryGateway: implements LibraryGateway over HTTP
 tests/
 ├── unit/                          # book0_presentation, book0_core models/errors, book0_config's
@@ -58,15 +62,16 @@ tests/
 ```
 
 `tests/conftest.py` holds the shared Calibre-shaped SQLite fixture (`calibre_metadata_db`) and
-its expected `Book` list (`CALIBRE_LIBRARY_BOOKS`) and `Author` list (`CALIBRE_LIBRARY_AUTHORS`)
-- `book0_core`, `book0_api`, and both CLIs' tests all build on it rather than each defining
-their own fixture DB.
+its expected `Book` list (`CALIBRE_LIBRARY_BOOKS`), `Author` list (`CALIBRE_LIBRARY_AUTHORS`),
+and `Publisher` list (`CALIBRE_LIBRARY_PUBLISHERS`) - `book0_core`, `book0_api`, and both
+CLIs' tests all build on it rather than each defining their own fixture DB.
 
 ## Dependency direction
 
 - `book0_core` depends on nothing project-specific and has no web/HTTP dependency.
-- `book0_presentation` depends only on `book0_core` (needs `Book`/`Author` for
-  `render_book_table`'s/`render_author_table`'s signatures). No CLI, no web framework.
+- `book0_presentation` depends only on `book0_core` (needs `Book`/`Author`/`Publisher` for
+  `render_book_table`'s/`render_author_table`'s/`render_publisher_table`'s signatures). No
+  CLI, no web framework.
 - `book0_config` depends on nothing project-specific - stdlib only (`tomllib`, `os`, `re`,
   `pathlib`).
 - `book0_cli` depends on `book0_core`, `book0_presentation`, **and `book0_config`** - directly
