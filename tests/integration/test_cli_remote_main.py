@@ -5,8 +5,16 @@ from fastapi.testclient import TestClient
 
 from book0_api.main import create_app
 from book0_cli_remote.main import run
-from book0_presentation.tables import render_author_table, render_book_table
-from tests.conftest import CALIBRE_LIBRARY_AUTHORS, CALIBRE_LIBRARY_BOOKS
+from book0_presentation.tables import (
+    render_author_table,
+    render_book_table,
+    render_publisher_table,
+)
+from tests.conftest import (
+    CALIBRE_LIBRARY_AUTHORS,
+    CALIBRE_LIBRARY_BOOKS,
+    CALIBRE_LIBRARY_PUBLISHERS,
+)
 
 
 def test_run_prints_table_for_a_known_tag(
@@ -102,3 +110,43 @@ def test_run_help_mentions_the_authors_subcommand(
 
     assert exc_info.value.code == 0
     assert "authors" in capsys.readouterr().out
+
+
+def test_run_prints_publisher_table_for_a_known_tag(
+    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        ["publishers", "--server", "unused", "--tag", "fiction"], client=client
+    )
+
+    assert exit_code == 0
+    assert (
+        capsys.readouterr().out
+        == render_publisher_table(CALIBRE_LIBRARY_PUBLISHERS) + "\n"
+    )
+
+
+def test_run_prints_no_publishers_found_for_an_unknown_tag(
+    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        ["publishers", "--server", "unused", "--tag", "does-not-exist"],
+        client=client,
+    )
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == "No publishers found.\n"
+
+
+def test_run_help_mentions_the_publishers_subcommand(
+    capsys: pytest.CaptureFixture[str],
+):
+    with pytest.raises(SystemExit) as exc_info:
+        run(["--help"])
+
+    assert exc_info.value.code == 0
+    assert "publishers" in capsys.readouterr().out

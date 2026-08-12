@@ -5,9 +5,13 @@ import httpx
 
 from book0_cli_remote.http_gateway import HttpLibraryGateway
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
-from book0_presentation.tables import render_author_table, render_book_table
+from book0_presentation.tables import (
+    render_author_table,
+    render_book_table,
+    render_publisher_table,
+)
 
-_SUBCOMMANDS = ("books", "authors")
+_SUBCOMMANDS = ("books", "authors", "publishers")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -21,6 +25,10 @@ def _build_parser() -> argparse.ArgumentParser:
     authors_parser = subparsers.add_parser("authors")
     authors_parser.add_argument("--server", required=True)
     authors_parser.add_argument("--tag", required=True)
+
+    publishers_parser = subparsers.add_parser("publishers")
+    publishers_parser.add_argument("--server", required=True)
+    publishers_parser.add_argument("--tag", required=True)
 
     return parser
 
@@ -46,6 +54,8 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
         try:
             if args.command == "authors":
                 print(render_author_table(gateway.list_authors()))
+            elif args.command == "publishers":
+                print(render_publisher_table(gateway.list_publishers()))
             else:
                 print(render_book_table(gateway.list_books()))
         except (LibraryNotFoundError, NotACalibreLibraryError) as error:
