@@ -1,11 +1,22 @@
 from datetime import datetime
 
-from book0_core.models import Author, Book, Publisher
+from book0_core.models import Author, Book, BookDetails, Publisher
 
 _BOOK_HEADERS = ("ID", "Title", "Author(s)", "Pub Date")
 _AUTHOR_HEADERS = ("ID", "Name")
 _PUBLISHER_HEADERS = ("ID", "Name")
+_BOOK_DETAILS_HEADERS = (
+    "ID",
+    "Title",
+    "Authors",
+    "Publisher",
+    "Series",
+    "Series Index",
+    "Tags",
+    "Pub Date",
+)
 _COLUMN_GAP = "  "
+_LIST_SEPARATOR = " & "
 
 
 def _format_pubdate(pubdate: str | None) -> str:
@@ -56,3 +67,23 @@ def render_publisher_table(publishers: list[Publisher]) -> str:
         (publisher.id, publisher.name) for publisher in publishers
     ]
     return _align_rows(_PUBLISHER_HEADERS, rows)
+
+
+def render_book_details_table(books: list[BookDetails]) -> str:
+    if not books:
+        return "No book details found."
+
+    rows: list[tuple[str, ...]] = [
+        (
+            book.id,
+            book.title,
+            _LIST_SEPARATOR.join(book.authors),
+            book.publisher.name if book.publisher is not None else "",
+            book.series.series.name if book.series is not None else "",
+            book.series.index or "" if book.series is not None else "",
+            _LIST_SEPARATOR.join(book.tags),
+            _format_pubdate(book.pubdate),
+        )
+        for book in books
+    ]
+    return _align_rows(_BOOK_DETAILS_HEADERS, rows)

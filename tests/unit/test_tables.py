@@ -1,6 +1,7 @@
-from book0_core.models import Author, Book, Publisher
+from book0_core.models import Author, Book, BookDetails, Publisher, Series, SeriesItem
 from book0_presentation.tables import (
     render_author_table,
+    render_book_details_table,
     render_book_table,
     render_publisher_table,
 )
@@ -90,3 +91,64 @@ def test_render_publisher_table_aligns_columns_with_headers():
 
 def test_render_publisher_table_reports_empty_library():
     assert render_publisher_table([]) == "No publishers found."
+
+
+def test_render_book_details_table_aligns_columns_with_headers():
+    books = [
+        BookDetails(
+            id="1",
+            title="Dune",
+            pubdate="1965-08-01",
+            authors=("Frank Herbert",),
+            tags=("sci-fi", "classic"),
+            publisher=Publisher(id="1", name="Ace Books"),
+            series=SeriesItem(
+                series=Series(id="1", name="Dune Chronicles"), index="1.0"
+            ),
+        ),
+        BookDetails(
+            id="2",
+            title="The Hobbit",
+            pubdate=None,
+            authors=("J.R.R. Tolkien",),
+            tags=(),
+            publisher=None,
+            series=None,
+        ),
+    ]
+
+    output = render_book_details_table(books)
+    # Compare with runs of whitespace collapsed to a single space, so this
+    # test checks column content/order, not exact padding widths (which
+    # _align_rows already has dedicated coverage for via the other
+    # render_*_table tests).
+    lines = [" ".join(line.split()) for line in output.splitlines()]
+
+    assert lines[0] == "ID Title Authors Publisher Series Series Index Tags Pub Date"
+    assert lines[1] == (
+        "1 Dune Frank Herbert Ace Books Dune Chronicles 1.0 sci-fi & classic 1965-08-01"
+    )
+    assert lines[2] == "2 The Hobbit J.R.R. Tolkien"
+
+
+def test_render_book_details_table_joins_multiple_authors_and_tags_with_ampersand():
+    books = [
+        BookDetails(
+            id="3",
+            title="Good Omens",
+            pubdate="1990-05-01",
+            authors=("Neil Gaiman", "Terry Pratchett"),
+            tags=("fantasy", "humor"),
+            publisher=Publisher(id="2", name="Gollancz"),
+            series=None,
+        ),
+    ]
+
+    output = render_book_details_table(books)
+
+    assert "Neil Gaiman & Terry Pratchett" in output
+    assert "fantasy & humor" in output
+
+
+def test_render_book_details_table_reports_empty_list():
+    assert render_book_details_table([]) == "No book details found."
