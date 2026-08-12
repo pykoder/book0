@@ -2,7 +2,15 @@ import sqlite3
 from pathlib import Path
 
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
-from book0_core.models import Author, Book, Publisher
+from book0_core.models import (
+    Author,
+    Book,
+    BookDetails,
+    BookDetailsResult,
+    Publisher,
+    Series,
+    SeriesItem,
+)
 
 _LIST_BOOKS_QUERY = """
     SELECT
@@ -20,6 +28,42 @@ _LIST_BOOKS_QUERY = """
 _LIST_AUTHORS_QUERY = "SELECT id, name FROM authors ORDER BY name"
 
 _LIST_PUBLISHERS_QUERY = "SELECT id, name FROM publishers ORDER BY name"
+
+# Authors and tags are aggregated via correlated subqueries, not a direct LEFT JOIN,
+# because joining two many-to-many link tables into the same query would fan out rows
+# - a book with 2 authors and 3 tags would produce 6 joined rows before any
+# GROUP_CONCAT. A scalar subquery per book avoids that. Publisher and series stay
+# plain LEFT JOINs because this project already treats them as at-most-one-per-book,
+# same as list_publishers.
+_GET_BOOK_DETAILS_QUERY_TEMPLATE = """
+    SELECT
+        books.id,
+        books.title,
+        books.pubdate,
+        books.series_index,
+        (
+            SELECT GROUP_CONCAT(authors.name, ', ')
+            FROM books_authors_link
+            JOIN authors ON authors.id = books_authors_link.author
+            WHERE books_authors_link.book = books.id
+        ) AS authors,
+        (
+            SELECT GROUP_CONCAT(tags.name, ', ')
+            FROM books_tags_link
+            JOIN tags ON tags.id = books_tags_link.tag
+            WHERE books_tags_link.book = books.id
+        ) AS tags,
+        publishers.id,
+        publishers.name,
+        series.id,
+        series.name
+    FROM books
+    LEFT JOIN books_publishers_link ON books_publishers_link.book = books.id
+    LEFT JOIN publishers ON publishers.id = books_publishers_link.publisher
+    LEFT JOIN books_series_link ON books_series_link.book = books.id
+    LEFT JOIN series ON series.id = books_series_link.series
+    WHERE books.id IN ({placeholders})
+"""
 
 # Calibre stores "no publication date" as a sentinel timestamp (year 101,
 # calibre.utils.date.UNDEFINED_DATE) rather than SQL NULL.
@@ -78,6 +122,50 @@ class SqliteLibraryGateway:
             connection.close()
 
         return [Publisher(id=str(row[0]), name=row[1]) for row in rows]
+
+    def get_book_details(self, ids: list[str]) -> BookDetailsResult:
+        if not self._db_path.exists():
+            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
+
+        connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+        try:
+            self._check_is_calibre_library(connection)
+            placeholders = ", ".join("?" for _ in ids)
+            query = _GET_BOOK_DETAILS_QUERY_TEMPLATE.format(placeholders=placeholders)
+            rows = connection.execute(query, ids).fetchall()
+        finally:
+            connection.close()
+
+        books = []
+        found_ids: set[str] = set()
+        for row in rows:
+            book_id = str(row[0])
+            found_ids.add(book_id)
+            books.append(
+                BookDetails(
+                    id=book_id,
+                    title=row[1],
+                    pubdate=self._normalize_pubdate(row[2]),
+                    authors=tuple(row[4].split(", ")) if row[4] else (),
+                    tags=tuple(row[5].split(", ")) if row[5] else (),
+                    publisher=(
+                        Publisher(id=str(row[6]), name=row[7])
+                        if row[6] is not None
+                        else None
+                    ),
+                    series=(
+                        SeriesItem(
+                            series=Series(id=str(row[8]), name=row[9]),
+                            index=str(row[3]) if row[3] is not None else None,
+                        )
+                        if row[8] is not None
+                        else None
+                    ),
+                )
+            )
+
+        missing_ids = tuple(id_ for id_ in ids if id_ not in found_ids)
+        return BookDetailsResult(books=tuple(books), missing_ids=missing_ids)
 
     @staticmethod
     def _normalize_pubdate(pubdate: str | None) -> str | None:

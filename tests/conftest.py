@@ -3,7 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from book0_core.models import Author, Book, Publisher
+from book0_core.models import (
+    Author,
+    Book,
+    BookDetails,
+    Publisher,
+    Series,
+    SeriesItem,
+)
 
 # Books as inserted into the fixture DB, already in the order list_books()
 # is expected to return them (sorted by title).
@@ -36,6 +43,39 @@ CALIBRE_LIBRARY_PUBLISHERS = [
     Publisher(id="2", name="Gollancz"),
 ]
 
+# BookDetails for the three books in the fixture DB, covering: a book with a
+# publisher, series, and tags (Dune); a book with none of them (The Hobbit);
+# a book with only some (Good Omens - publisher and tags, no series).
+DUNE_DETAILS = BookDetails(
+    id="1",
+    title="Dune",
+    pubdate="1965-08-01",
+    authors=("Frank Herbert",),
+    tags=("sci-fi", "classic"),
+    publisher=Publisher(id="1", name="Ace Books"),
+    series=SeriesItem(series=Series(id="1", name="Dune Chronicles"), index="1.0"),
+)
+
+HOBBIT_DETAILS = BookDetails(
+    id="2",
+    title="The Hobbit",
+    pubdate=None,
+    authors=("J.R.R. Tolkien",),
+    tags=(),
+    publisher=None,
+    series=None,
+)
+
+GOOD_OMENS_DETAILS = BookDetails(
+    id="3",
+    title="Good Omens",
+    pubdate="1990-05-01",
+    authors=("Neil Gaiman", "Terry Pratchett"),
+    tags=("fantasy", "humor"),
+    publisher=Publisher(id="2", name="Gollancz"),
+    series=None,
+)
+
 
 @pytest.fixture
 def calibre_metadata_db(tmp_path: Path) -> Path:
@@ -47,7 +87,8 @@ def calibre_metadata_db(tmp_path: Path) -> Path:
             CREATE TABLE books (
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
-                pubdate TEXT
+                pubdate TEXT,
+                series_index REAL
             );
             CREATE TABLE authors (
                 id INTEGER PRIMARY KEY,
@@ -67,14 +108,32 @@ def calibre_metadata_db(tmp_path: Path) -> Path:
                 book INTEGER NOT NULL,
                 publisher INTEGER NOT NULL
             );
+            CREATE TABLE series (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE books_series_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                series INTEGER NOT NULL
+            );
+            CREATE TABLE tags (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE books_tags_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                tag INTEGER NOT NULL
+            );
             """
         )
         connection.executemany(
-            "INSERT INTO books (id, title, pubdate) VALUES (?, ?, ?)",
+            "INSERT INTO books (id, title, pubdate, series_index) VALUES (?, ?, ?, ?)",
             [
-                (1, "Dune", "1965-08-01"),
-                (2, "The Hobbit", None),
-                (3, "Good Omens", "1990-05-01"),
+                (1, "Dune", "1965-08-01", 1.0),
+                (2, "The Hobbit", None, None),
+                (3, "Good Omens", "1990-05-01", None),
             ],
         )
         connection.executemany(
@@ -100,6 +159,27 @@ def calibre_metadata_db(tmp_path: Path) -> Path:
         connection.executemany(
             "INSERT INTO books_publishers_link (book, publisher) VALUES (?, ?)",
             [(1, 1), (3, 2)],
+        )
+        connection.executemany(
+            "INSERT INTO series (id, name) VALUES (?, ?)",
+            [(1, "Dune Chronicles")],
+        )
+        connection.executemany(
+            "INSERT INTO books_series_link (book, series) VALUES (?, ?)",
+            [(1, 1)],
+        )
+        connection.executemany(
+            "INSERT INTO tags (id, name) VALUES (?, ?)",
+            [
+                (1, "sci-fi"),
+                (2, "classic"),
+                (3, "fantasy"),
+                (4, "humor"),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO books_tags_link (book, tag) VALUES (?, ?)",
+            [(1, 1), (1, 2), (3, 3), (3, 4)],
         )
         connection.commit()
     finally:
