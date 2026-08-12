@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from book0_api.schemas import AuthorOut, BookOut
+from book0_api.schemas import AuthorOut, BookOut, PublisherOut
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 
@@ -54,5 +54,27 @@ def create_app(libraries: dict[str, Path]) -> FastAPI:
             )
 
         return [AuthorOut.from_author(author) for author in authors]
+
+    @app.get("/libraries/{tag}/publishers", response_model=None)
+    def list_publishers(tag: str) -> list[PublisherOut] | JSONResponse:
+        db_path = libraries.get(tag)
+        if db_path is None:
+            return []
+
+        gateway = SqliteLibraryGateway(db_path)
+        try:
+            publishers = gateway.list_publishers()
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+        except NotACalibreLibraryError as error:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "NotACalibreLibraryError", "detail": str(error)},
+            )
+
+        return [PublisherOut.from_publisher(publisher) for publisher in publishers]
 
     return app
