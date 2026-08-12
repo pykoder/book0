@@ -7,11 +7,12 @@ from book0_cli_remote.http_gateway import HttpLibraryGateway
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_presentation.tables import (
     render_author_table,
+    render_book_details_table,
     render_book_table,
     render_publisher_table,
 )
 
-_SUBCOMMANDS = ("books", "authors", "publishers")
+_SUBCOMMANDS = ("books", "authors", "publishers", "books-detail")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -29,6 +30,13 @@ def _build_parser() -> argparse.ArgumentParser:
     publishers_parser = subparsers.add_parser("publishers")
     publishers_parser.add_argument("--server", required=True)
     publishers_parser.add_argument("--tag", required=True)
+
+    books_detail_parser = subparsers.add_parser("books-detail")
+    books_detail_parser.add_argument(
+        "--ids", required=True, help="comma-separated list of book ids"
+    )
+    books_detail_parser.add_argument("--server", required=True)
+    books_detail_parser.add_argument("--tag", required=True)
 
     return parser
 
@@ -56,6 +64,18 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
                 print(render_author_table(gateway.list_authors()))
             elif args.command == "publishers":
                 print(render_publisher_table(gateway.list_publishers()))
+            elif args.command == "books-detail":
+                ids = args.ids.split(",") if args.ids else []
+                result = gateway.get_book_details(ids)
+                books_by_id = {book.id: book for book in result.books}
+                ordered_books = [
+                    books_by_id[requested_id]
+                    for requested_id in ids
+                    if requested_id in books_by_id
+                ]
+                print(render_book_details_table(ordered_books))
+                if result.missing_ids:
+                    print(f"Missing ids: {', '.join(result.missing_ids)}")
             else:
                 print(render_book_table(gateway.list_books()))
         except (LibraryNotFoundError, NotACalibreLibraryError) as error:

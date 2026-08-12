@@ -7,6 +7,7 @@ from book0_api.main import create_app
 from book0_cli_remote.main import run
 from book0_presentation.tables import (
     render_author_table,
+    render_book_details_table,
     render_book_table,
     render_publisher_table,
 )
@@ -14,6 +15,8 @@ from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
+    DUNE_DETAILS,
+    GOOD_OMENS_DETAILS,
 )
 
 
@@ -150,3 +153,95 @@ def test_run_help_mentions_the_publishers_subcommand(
 
     assert exc_info.value.code == 0
     assert "publishers" in capsys.readouterr().out
+
+
+def test_run_prints_book_details_in_the_requested_id_order(
+    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        [
+            "books-detail",
+            "--ids",
+            "3,1",
+            "--server",
+            "unused",
+            "--tag",
+            "fiction",
+        ],
+        client=client,
+    )
+
+    assert exit_code == 0
+    assert (
+        capsys.readouterr().out
+        == render_book_details_table([GOOD_OMENS_DETAILS, DUNE_DETAILS]) + "\n"
+    )
+
+
+def test_run_reports_missing_ids_for_book_details(
+    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        [
+            "books-detail",
+            "--ids",
+            "1,999",
+            "--server",
+            "unused",
+            "--tag",
+            "fiction",
+        ],
+        client=client,
+    )
+
+    assert exit_code == 0
+    captured = capsys.readouterr().out
+    assert (
+        captured == render_book_details_table([DUNE_DETAILS]) + "\nMissing ids: 999\n"
+    )
+
+
+def test_run_reports_all_ids_missing_for_an_unconfigured_tag(
+    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        [
+            "books-detail",
+            "--ids",
+            "1,2",
+            "--server",
+            "unused",
+            "--tag",
+            "does-not-exist",
+        ],
+        client=client,
+    )
+
+    assert exit_code == 0
+    captured = capsys.readouterr().out
+    assert captured == "No book details found.\nMissing ids: 1, 2\n"
+
+
+def test_run_reports_usage_error_when_ids_is_omitted_entirely(
+    capsys: pytest.CaptureFixture[str],
+):
+    with pytest.raises(SystemExit) as exc_info:
+        run(["books-detail", "--server", "unused", "--tag", "fiction"])
+
+    assert exc_info.value.code == 2
+
+
+def test_run_help_mentions_the_books_detail_subcommand(
+    capsys: pytest.CaptureFixture[str],
+):
+    with pytest.raises(SystemExit) as exc_info:
+        run(["--help"])
+
+    assert exc_info.value.code == 0
+    assert "books-detail" in capsys.readouterr().out
