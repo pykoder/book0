@@ -1,9 +1,10 @@
 from datetime import datetime
 
-from book0_core.models import Author, Book
+from book0_core.models import Author, Book, Publisher
 
 _BOOK_HEADERS = ("ID", "Title", "Author(s)", "Pub Date")
 _AUTHOR_HEADERS = ("ID", "Name")
+_PUBLISHER_HEADERS = ("ID", "Name")
 _COLUMN_GAP = "  "
 
 
@@ -45,3 +46,13 @@ def render_author_table(authors: list[Author]) -> str:
 
     rows: list[tuple[str, ...]] = [(str(author.id), author.name) for author in authors]
     return _align_rows(_AUTHOR_HEADERS, rows)
+
+
+def render_publisher_table(publishers: list[Publisher]) -> str:
+    if not publishers:
+        return "No publishers found."
+
+    rows: list[tuple[str, ...]] = [
+        (str(publisher.id), publisher.name) for publisher in publishers
+    ]
+    return _align_rows(_PUBLISHER_HEADERS, rows)

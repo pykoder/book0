@@ -1,5 +1,9 @@
-from book0_core.models import Author, Book
-from book0_presentation.tables import render_author_table, render_book_table
+from book0_core.models import Author, Book, Publisher
+from book0_presentation.tables import (
+    render_author_table,
+    render_book_table,
+    render_publisher_table,
+)
 
 
 def test_render_book_table_aligns_columns_with_headers():
@@ -71,3 +75,18 @@ def test_render_author_table_aligns_columns_with_headers():
 
 def test_render_author_table_reports_empty_library():
     assert render_author_table([]) == "No authors found."
+
+
+def test_render_publisher_table_aligns_columns_with_headers():
+    publishers = [
+        Publisher(id=1, name="Ace Books"),
+        Publisher(id=2, name="Gollancz"),
+    ]
+
+    output = render_publisher_table(publishers)
+
+    assert output == "ID  Name\n1   Ace Books\n2   Gollancz"
+
+
+def test_render_publisher_table_reports_empty_library():
+    assert render_publisher_table([]) == "No publishers found."
