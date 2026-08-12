@@ -1,12 +1,50 @@
 import httpx
 
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
-from book0_core.models import Author, Book, Publisher
+from book0_core.models import (
+    Author,
+    Book,
+    BookDetails,
+    BookDetailsResult,
+    Publisher,
+    Series,
+    SeriesItem,
+)
 
 _ERROR_TYPES = {
     "LibraryNotFoundError": LibraryNotFoundError,
     "NotACalibreLibraryError": NotACalibreLibraryError,
 }
+
+
+def _book_details_from_json(row: dict[str, object]) -> BookDetails:
+    publisher_row = row["publisher"]
+    publisher = (
+        Publisher(id=publisher_row["id"], name=publisher_row["name"])  # type: ignore[index]
+        if publisher_row is not None
+        else None
+    )
+    series_row = row["series"]
+    series = (
+        SeriesItem(
+            series=Series(
+                id=series_row["series"]["id"],  # type: ignore[index]
+                name=series_row["series"]["name"],  # type: ignore[index]
+            ),
+            index=series_row["index"],  # type: ignore[index]
+        )
+        if series_row is not None
+        else None
+    )
+    return BookDetails(
+        id=row["id"],  # type: ignore[arg-type]
+        title=row["title"],  # type: ignore[arg-type]
+        pubdate=row["pubdate"],  # type: ignore[arg-type]
+        authors=tuple(row["authors"]),  # type: ignore[arg-type]
+        tags=tuple(row["tags"]),  # type: ignore[arg-type]
+        publisher=publisher,
+        series=series,
+    )
 
 
 class HttpLibraryGateway:
@@ -54,3 +92,20 @@ class HttpLibraryGateway:
         response.raise_for_status()
 
         return [Publisher(id=row["id"], name=row["name"]) for row in response.json()]
+
+    def get_book_details(self, ids: list[str]) -> BookDetailsResult:
+        response = self._client.post(
+            f"/libraries/{self._tag}/books/detail", json={"ids": ids}
+        )
+
+        if response.status_code in (404, 500):
+            body = response.json()
+            error_type = _ERROR_TYPES[body["error"]]
+            raise error_type(body["detail"])
+        response.raise_for_status()
+
+        body = response.json()
+        return BookDetailsResult(
+            books=tuple(_book_details_from_json(row) for row in body["books"]),
+            missing_ids=tuple(body["missing_ids"]),
+        )
