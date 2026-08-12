@@ -4,7 +4,7 @@ from book0_core.models import Author, Book, Publisher
 
 
 class AuthorOut(BaseModel):
-    id: int
+    id: str
     name: str
 
     @classmethod
@@ -13,7 +13,7 @@ class AuthorOut(BaseModel):
 
 
 class PublisherOut(BaseModel):
-    id: int
+    id: str
     name: str
 
     @classmethod
@@ -22,7 +22,7 @@ class PublisherOut(BaseModel):
 
 
 class BookOut(BaseModel):
-    id: int
+    id: str
     title: str
     authors: list[str]
     pubdate: str | None
