@@ -7,6 +7,7 @@ import pytest
 from book0_cli.main import run
 from book0_presentation.tables import (
     render_author_table,
+    render_book_details_table,
     render_book_table,
     render_publisher_table,
 )
@@ -14,6 +15,8 @@ from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
+    DUNE_DETAILS,
+    GOOD_OMENS_DETAILS,
 )
 
 
@@ -420,3 +423,96 @@ def test_run_help_mentions_the_publishers_subcommand(
 
     assert exc_info.value.code == 0
     assert "publishers" in capsys.readouterr().out
+
+
+def test_run_prints_book_details_in_the_requested_id_order(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", calibre_metadata_db)
+
+    exit_code = run(["books-detail", "--ids", "3,1", "--tag", "fiction"])
+
+    assert exit_code == 0
+    assert (
+        capsys.readouterr().out
+        == render_book_details_table([GOOD_OMENS_DETAILS, DUNE_DETAILS]) + "\n"
+    )
+
+
+def test_run_reports_missing_ids_for_book_details(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", calibre_metadata_db)
+
+    exit_code = run(["books-detail", "--ids", "1,999", "--tag", "fiction"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr().out
+    assert (
+        captured == render_book_details_table([DUNE_DETAILS]) + "\nMissing ids: 999\n"
+    )
+
+
+def test_run_prints_no_book_details_found_when_all_ids_are_unknown(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", calibre_metadata_db)
+
+    exit_code = run(["books-detail", "--ids", "999", "--tag", "fiction"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == "No book details found.\nMissing ids: 999\n"
+
+
+def test_run_treats_empty_ids_as_an_empty_request(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", calibre_metadata_db)
+
+    exit_code = run(["books-detail", "--ids", "", "--tag", "fiction"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == "No book details found.\n"
+
+
+def test_run_reports_usage_error_when_ids_is_omitted_entirely(
+    capsys: pytest.CaptureFixture[str],
+):
+    with pytest.raises(SystemExit) as exc_info:
+        run(["books-detail"])
+
+    assert exc_info.value.code == 2
+
+
+def test_run_help_mentions_the_books_detail_subcommand(
+    capsys: pytest.CaptureFixture[str],
+):
+    with pytest.raises(SystemExit) as exc_info:
+        run(["--help"])
+
+    assert exc_info.value.code == 0
+    assert "books-detail" in capsys.readouterr().out
