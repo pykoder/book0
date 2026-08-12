@@ -1,6 +1,8 @@
 # book0
 
-Lists the books, authors, or publishers in a [Calibre](https://calibre-ebook.com/) library. Two ways to run it:
+Lists the books, authors, or publishers in a [Calibre](https://calibre-ebook.com/) library,
+and fetches richer joined details (publisher, series, tags) for a specific set of book ids.
+Two ways to run it:
 
 - **`book0`** - reads the library's `metadata.db` SQLite file directly (read-only).
 - **`book0-remote`** - talks over HTTP to `book0_api`, a small FastAPI service that reads
@@ -23,13 +25,14 @@ This creates `.venv/` and installs all three console scripts (`book0`, `book0-re
 ## `book0` - direct CLI
 
 Point it at a library by tag (configured via `./.book0.toml`, or `~/.config/book0/config.toml` / `$XDG_CONFIG_HOME/book0/config.toml` as fallback), or use no flag to read
-Calibre's own default library. Choose `books`, `authors`, or `publishers` - `books` is the
-default:
+Calibre's own default library. Choose `books`, `authors`, `publishers`, or `books-detail` -
+`books` is the default:
 
 ```sh
 uv run book0 books --tag <tag>      # or just `uv run book0 --tag <tag>` - `books` is the default
 uv run book0 authors --tag <tag>
 uv run book0 publishers --tag <tag>
+uv run book0 books-detail --ids 1,2,3 --tag <tag>
 # or, with no --tag:
 uv run book0                        # reads Calibre's default library (books)
 ```
@@ -48,6 +51,14 @@ ID  Name
 ID  Name
 1   Ace Books
 ```
+
+```
+ID  Title  Authors        Publisher  Series           Series Index  Tags              Pub Date
+1   Dune   Frank Herbert  Ace Books  Dune Chronicles  1.0           sci-fi & classic  1965-08-01
+```
+
+`books-detail` never errors on an unknown id - it prints a `Missing ids: ...` line after the
+table (or on its own, if none of the requested ids were found) instead.
 
 `.book0.toml` (or the XDG fallback) maps tags to library paths, same shape as
 `book0-libraries.toml`:
@@ -163,6 +174,7 @@ uv run book0-remote books --server http://127.0.0.1:8000 --tag fiction
 # or just `uv run book0-remote --server ... --tag fiction` - `books` is the default
 uv run book0-remote authors --server http://127.0.0.1:8000 --tag fiction
 uv run book0-remote publishers --server http://127.0.0.1:8000 --tag fiction
+uv run book0-remote books-detail --ids 1,2,3 --server http://127.0.0.1:8000 --tag fiction
 ```
 
 Same table output, same `No books found.` / `No authors found.` / `No publishers found.` for
