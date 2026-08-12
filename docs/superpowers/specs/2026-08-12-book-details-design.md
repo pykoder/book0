@@ -129,14 +129,18 @@ special case.
 
 ## Presentation
 
-`book0_presentation/tables.py` gains `render_book_details_table(result: BookDetailsResult) ->
-str`:
+`book0_presentation/tables.py` gains `render_book_details_table(books: list[BookDetails]) ->
+str` — same shape as every other `render_*_table` function: it formats whatever sequence of
+`BookDetails` it's handed, in the order given, with no knowledge of `BookDetailsResult`,
+`missing_ids`, requested ids, or the Gateway. Reordering to match the originally-requested
+`--ids` order, and anything to do with `missing_ids`, is the caller's (CLI's) responsibility —
+see CLI UX below. This keeps the presentation layer exactly as "dumb" as
+`render_book_table`/`render_author_table`/`render_publisher_table` already are.
 
-- If `result.books` is empty: `"No book details found."` (matching the existing empty-result
-  convention), followed by a "Missing ids: ..." line if `missing_ids` is non-empty.
+- If `books` is empty: `"No book details found."` (matching the existing empty-result
+  convention).
 - Otherwise: an aligned table (same `_align_rows` helper) with one row per book — columns
-  covering id, title, authors, publisher, series (name + index), tags, pub date — followed by
-  a trailing "Missing ids: ..." line if any were missing.
+  covering id, title, authors, publisher, series (name + index), tags, pub date.
 - Authors and tags are joined with `" & "` per the cell (not `", "` like the existing books
   table), to leave room for a comma to mean something else if a future column needs it (e.g.
   Calibre-style "Lastname, Firstname" author formatting, which uses a comma internally). This
@@ -159,6 +163,18 @@ and comes back in `missing_ids`, it is never a CLI usage error. Omitting `--ids`
 value at all) *is* a usage error — this is `argparse`'s ordinary required-argument behavior,
 not custom validation. An empty resolved id list (e.g. `--ids ""`) is valid at the
 gateway/protocol level and returns an empty result.
+
+Both CLIs' `run()` own two things the Gateway and presentation layer deliberately don't:
+
+- **Ordering for display.** After calling `get_book_details(ids)`, `run()` reorders
+  `result.books` to match the order `--ids` was given (plain Python — e.g. build a lookup by
+  `id` and walk the parsed `--ids` list) before calling `render_book_details_table` with that
+  ordered sequence. This is what gives the user a deterministic, request-order display without
+  requiring the Gateway or presentation layer to guarantee anything.
+- **Reporting missing ids.** After printing the table, if `result.missing_ids` is non-empty,
+  `run()` prints its own line about them directly (e.g. `Missing ids: 4, 99`) — this is plain
+  CLI-level string formatting, not a presentation-layer function, and not something
+  `render_book_details_table` knows about.
 
 The CLI subcommand name (`books-detail`) mapping to the API route's path segment
 (`/books/detail`) — dash becomes slash — is noted as a naming convention that may recur for
@@ -183,14 +199,20 @@ future subcommands, not something enforced by shared code today.
   fixture data covering: a book with a publisher, series, and tags; a book with none of them;
   a book with only some.
 - Unit: `Series`, `SeriesItem`, `BookDetails`, `BookDetailsResult`, the new API schemas'
-  `from_*` classmethods, `render_book_details_table` (empty, found books, missing ids, mixed).
+  `from_*` classmethods, `render_book_details_table` (empty list, one book, several books,
+  rendered in whatever order the list is given — no reordering or missing-ids logic to test
+  here, since the function doesn't have either).
 - Integration: `SqliteLibraryGateway.get_book_details` (nominal with all fields populated, a
   book missing publisher/series/tags, missing ids, empty `ids` list, missing file, non-Calibre
-  file), `HttpLibraryGateway.get_book_details` (same cases via the real route), both CLIs'
-  `run()` for `books-detail` (including the `--ids` comma-parsing, a non-numeric id landing in
-  `missing_ids`, and the missing-`--ids`-value usage error). Every test comparing `books`/
-  `missing_ids` against expected data does so order-independently (set comparison or sorting
-  both sides before comparing) — no test may rely on either collection's return order.
+  file), `HttpLibraryGateway.get_book_details` (same cases via the real route). Every test
+  comparing `books`/`missing_ids` against expected data does so order-independently (set
+  comparison or sorting both sides before comparing) — no test may rely on either collection's
+  return order at the Gateway level.
+- Integration, both CLIs' `run()` for `books-detail`: the `--ids` comma-parsing, a non-numeric
+  id landing in `missing_ids`, the missing-`--ids`-value usage error, **and** two cases specific
+  to the CLI's own responsibilities — requesting ids out of title-sort order and confirming the
+  printed table follows the requested order instead, and requesting a mix of known/unknown ids
+  and confirming the "Missing ids: ..." line reports the unknown ones.
 - E2E: the new route (nominal, unconfigured tag, both error mappings, ids partially found).
 
 ## Out of scope
