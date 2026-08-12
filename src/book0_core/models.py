@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Book:
-    id: int
+    id: str
     title: str
     authors: tuple[str, ...]
     pubdate: str | None
@@ -11,11 +11,11 @@ class Book:
 
 @dataclass(frozen=True)
 class Author:
-    id: int
+    id: str
     name: str
 
 
 @dataclass(frozen=True)
 class Publisher:
-    id: int
+    id: str
     name: str
