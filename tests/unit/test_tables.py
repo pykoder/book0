@@ -8,14 +8,14 @@ from book0_presentation.tables import (
 
 def test_render_book_table_aligns_columns_with_headers():
     books = [
-        Book(id=1, title="Dune", authors=("Frank Herbert",), pubdate="1965-08-01"),
+        Book(id="1", title="Dune", authors=("Frank Herbert",), pubdate="1965-08-01"),
         Book(
-            id=3,
+            id="3",
             title="Good Omens",
             authors=("Neil Gaiman", "Terry Pratchett"),
             pubdate="1990-05-01",
         ),
-        Book(id=2, title="The Hobbit", authors=("J.R.R. Tolkien",), pubdate=None),
+        Book(id="2", title="The Hobbit", authors=("J.R.R. Tolkien",), pubdate=None),
     ]
 
     output = render_book_table(books)
@@ -35,7 +35,7 @@ def test_render_book_table_reports_empty_library():
 def test_render_book_table_shows_date_only_when_pubdate_has_a_time_component():
     books = [
         Book(
-            id=1,
+            id="1",
             title="Dune",
             authors=("Frank Herbert",),
             pubdate="1965-08-01T23:00:00+00:00",
@@ -51,7 +51,7 @@ def test_render_book_table_shows_date_only_when_pubdate_has_a_time_component():
 
 def test_render_book_table_shows_empty_pubdate_when_none():
     books = [
-        Book(id=1, title="Dune", authors=("Frank Herbert",), pubdate=None),
+        Book(id="1", title="Dune", authors=("Frank Herbert",), pubdate=None),
     ]
 
     output = render_book_table(books)
@@ -61,9 +61,9 @@ def test_render_book_table_shows_empty_pubdate_when_none():
 
 def test_render_author_table_aligns_columns_with_headers():
     authors = [
-        Author(id=1, name="Frank Herbert"),
-        Author(id=3, name="Neil Gaiman"),
-        Author(id=2, name="J.R.R. Tolkien"),
+        Author(id="1", name="Frank Herbert"),
+        Author(id="3", name="Neil Gaiman"),
+        Author(id="2", name="J.R.R. Tolkien"),
     ]
 
     output = render_author_table(authors)
@@ -79,8 +79,8 @@ def test_render_author_table_reports_empty_library():
 
 def test_render_publisher_table_aligns_columns_with_headers():
     publishers = [
-        Publisher(id=1, name="Ace Books"),
-        Publisher(id=2, name="Gollancz"),
+        Publisher(id="1", name="Ace Books"),
+        Publisher(id="2", name="Gollancz"),
     ]
 
     output = render_publisher_table(publishers)

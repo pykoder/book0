@@ -30,7 +30,7 @@ def render_book_table(books: list[Book]) -> str:
 
     rows: list[tuple[str, ...]] = [
         (
-            str(book.id),
+            book.id,
             book.title,
             ", ".join(book.authors),
             _format_pubdate(book.pubdate),
@@ -44,7 +44,7 @@ def render_author_table(authors: list[Author]) -> str:
     if not authors:
         return "No authors found."
 
-    rows: list[tuple[str, ...]] = [(str(author.id), author.name) for author in authors]
+    rows: list[tuple[str, ...]] = [(author.id, author.name) for author in authors]
     return _align_rows(_AUTHOR_HEADERS, rows)
 
 
@@ -53,6 +53,6 @@ def render_publisher_table(publishers: list[Publisher]) -> str:
         return "No publishers found."
 
     rows: list[tuple[str, ...]] = [
-        (str(publisher.id), publisher.name) for publisher in publishers
+        (publisher.id, publisher.name) for publisher in publishers
     ]
     return _align_rows(_PUBLISHER_HEADERS, rows)
