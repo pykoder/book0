@@ -12,6 +12,8 @@ from book0_config.config import load_libraries
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 from book0_presentation.tables import (
+    format_missing_ids_message,
+    order_book_details_by_ids,
     render_author_table,
     render_book_details_table,
     render_book_table,
@@ -93,15 +95,11 @@ def run(argv: list[str] | None = None) -> int:
         elif args.command == "books-detail":
             ids = args.ids.split(",") if args.ids else []
             result = gateway.get_book_details(ids)
-            books_by_id = {book.id: book for book in result.books}
-            ordered_books = [
-                books_by_id[requested_id]
-                for requested_id in ids
-                if requested_id in books_by_id
-            ]
+            ordered_books = order_book_details_by_ids(result, ids)
             print(render_book_details_table(ordered_books))
-            if result.missing_ids:
-                print(f"Missing ids: {', '.join(result.missing_ids)}")
+            missing_ids_message = format_missing_ids_message(result.missing_ids)
+            if missing_ids_message is not None:
+                print(missing_ids_message)
         else:
             print(render_book_table(gateway.list_books()))
     except (LibraryNotFoundError, NotACalibreLibraryError) as error:

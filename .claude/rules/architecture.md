@@ -32,7 +32,10 @@ src/
 │   └── tables.py                  # render_book_table(list[Book]) -> str, render_author_table(list[Author]) -> str,
 │                                    # render_publisher_table(list[Publisher]) -> str,
 │                                    # render_book_details_table(list[BookDetails]) -> str,
-│                                    # aligned plain-text tables
+│                                    # aligned plain-text tables; order_book_details_by_ids(
+│                                    # BookDetailsResult, ids) -> list[BookDetails] and
+│                                    # format_missing_ids_message(missing_ids) -> str | None,
+│                                    # shared by both CLIs' books-detail dispatch
 ├── book0_config/
 │   └── config.py                  # load_libraries(path) -> dict[str, Path], reads a TOML file;
 │                                    # shared by book0_cli and book0_api
@@ -81,8 +84,9 @@ CLIs' tests all build on it rather than each defining their own fixture DB.
 
 - `book0_core` depends on nothing project-specific and has no web/HTTP dependency.
 - `book0_presentation` depends only on `book0_core` (needs `Book`/`Author`/`Publisher`/
-  `BookDetails` for `render_book_table`'s/`render_author_table`'s/`render_publisher_table`'s/
-  `render_book_details_table`'s signatures). No CLI, no web framework.
+  `BookDetails`/`BookDetailsResult` for `render_book_table`'s/`render_author_table`'s/
+  `render_publisher_table`'s/`render_book_details_table`'s/`order_book_details_by_ids`'s
+  signatures). No CLI, no web framework.
 - `book0_config` depends on nothing project-specific - stdlib only (`tomllib`, `os`, `re`,
   `pathlib`).
 - `book0_cli` depends on `book0_core`, `book0_presentation`, **and `book0_config`** - directly

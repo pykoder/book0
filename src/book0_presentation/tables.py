@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from book0_core.models import Author, Book, BookDetails, Publisher
+from book0_core.models import Author, Book, BookDetails, BookDetailsResult, Publisher
 
 _BOOK_HEADERS = ("ID", "Title", "Author(s)", "Pub Date")
 _AUTHOR_HEADERS = ("ID", "Name")
@@ -23,6 +23,10 @@ def _format_pubdate(pubdate: str | None) -> str:
     if pubdate is None:
         return ""
     return datetime.fromisoformat(pubdate).date().isoformat()
+
+
+def _or_empty(value: str | None) -> str:
+    return value if value is not None else ""
 
 
 def _align_rows(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
@@ -78,12 +82,27 @@ def render_book_details_table(books: list[BookDetails]) -> str:
             book.id,
             book.title,
             _LIST_SEPARATOR.join(book.authors),
-            book.publisher.name if book.publisher is not None else "",
-            book.series.series.name if book.series is not None else "",
-            book.series.index or "" if book.series is not None else "",
+            _or_empty(book.publisher.name if book.publisher is not None else None),
+            _or_empty(book.series.series.name if book.series is not None else None),
+            _or_empty(book.series.index if book.series is not None else None),
             _LIST_SEPARATOR.join(book.tags),
             _format_pubdate(book.pubdate),
         )
         for book in books
     ]
     return _align_rows(_BOOK_DETAILS_HEADERS, rows)
+
+
+def order_book_details_by_ids(
+    result: BookDetailsResult, ids: list[str]
+) -> list[BookDetails]:
+    books_by_id = {book.id: book for book in result.books}
+    return [
+        books_by_id[requested_id] for requested_id in ids if requested_id in books_by_id
+    ]
+
+
+def format_missing_ids_message(missing_ids: tuple[str, ...]) -> str | None:
+    if not missing_ids:
+        return None
+    return f"Missing ids: {', '.join(missing_ids)}"

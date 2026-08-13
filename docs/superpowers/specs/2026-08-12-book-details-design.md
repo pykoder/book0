@@ -149,6 +149,19 @@ see CLI UX below. This keeps the presentation layer exactly as "dumb" as
 
 Exact column order/widths are a plan-level decision.
 
+**Amendment (post-implementation cleanup):** `render_book_details_table` itself is unchanged
+— still just `(books: list[BookDetails]) -> str`, still ignorant of `BookDetailsResult`,
+`missing_ids`, and requested ids. But the reordering and missing-ids-message logic described
+under "CLI UX" below turned out to be identical across both CLIs, so rather than leave it
+duplicated it was extracted into two small functions that *do* live in
+`book0_presentation/tables.py` and *do* know about `BookDetailsResult`/ids:
+`order_book_details_by_ids(result: BookDetailsResult, ids: list[str]) -> list[BookDetails]`
+and `format_missing_ids_message(missing_ids: tuple[str, ...]) -> str | None`. Both CLIs' `run()`
+call these instead of inlining the logic themselves. This is a deliberate, requested exception
+to this section's original "no knowledge of `BookDetailsResult`" rule for
+`render_book_details_table` specifically — the rule still holds for the render function itself,
+it just no longer describes every function in the module.
+
 ## CLI UX
 
 Both `book0` and `book0-remote` gain a fourth subcommand, `books-detail`:
