@@ -10,16 +10,34 @@ from book0_api.schemas import (
     BookOut,
     PublisherOut,
 )
-from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
+from book0_core.errors import (
+    LibraryNotFoundError,
+    NotACalibreLibraryError,
+    TagRequiredError,
+)
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 
 
-def create_app(libraries: dict[str, Path]) -> FastAPI:
+def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> FastAPI:
     app = FastAPI()
 
-    @app.get("/libraries/{tag}/books", response_model=None)
-    def list_books(tag: str) -> list[BookOut] | JSONResponse:
-        db_path = libraries.get(tag)
+    def _resolve_db_path(tag: str | None) -> Path | None:
+        resolved_tag = tag if tag is not None else default_tag
+        if resolved_tag is None:
+            raise TagRequiredError(
+                "No tag given and no default-library configured for this server"
+            )
+        return libraries.get(resolved_tag)
+
+    @app.get("/libraries/books", response_model=None)
+    def list_books(tag: str | None = None) -> list[BookOut] | JSONResponse:
+        try:
+            db_path = _resolve_db_path(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
         if db_path is None:
             return []
 
@@ -39,9 +57,15 @@ def create_app(libraries: dict[str, Path]) -> FastAPI:
 
         return [BookOut.from_book(book) for book in books]
 
-    @app.get("/libraries/{tag}/authors", response_model=None)
-    def list_authors(tag: str) -> list[AuthorOut] | JSONResponse:
-        db_path = libraries.get(tag)
+    @app.get("/libraries/authors", response_model=None)
+    def list_authors(tag: str | None = None) -> list[AuthorOut] | JSONResponse:
+        try:
+            db_path = _resolve_db_path(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
         if db_path is None:
             return []
 
@@ -61,9 +85,15 @@ def create_app(libraries: dict[str, Path]) -> FastAPI:
 
         return [AuthorOut.from_author(author) for author in authors]
 
-    @app.get("/libraries/{tag}/publishers", response_model=None)
-    def list_publishers(tag: str) -> list[PublisherOut] | JSONResponse:
-        db_path = libraries.get(tag)
+    @app.get("/libraries/publishers", response_model=None)
+    def list_publishers(tag: str | None = None) -> list[PublisherOut] | JSONResponse:
+        try:
+            db_path = _resolve_db_path(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
         if db_path is None:
             return []
 
@@ -83,11 +113,17 @@ def create_app(libraries: dict[str, Path]) -> FastAPI:
 
         return [PublisherOut.from_publisher(publisher) for publisher in publishers]
 
-    @app.post("/libraries/{tag}/books/detail", response_model=None)
+    @app.post("/libraries/books/detail", response_model=None)
     def get_book_details(
-        tag: str, body: BookIdsIn
+        body: BookIdsIn, tag: str | None = None
     ) -> BookDetailsResultOut | JSONResponse:
-        db_path = libraries.get(tag)
+        try:
+            db_path = _resolve_db_path(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
         if db_path is None:
             return BookDetailsResultOut(books=[], missing_ids=body.ids)
 
