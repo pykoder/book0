@@ -72,7 +72,8 @@ fiction = "/path/to/fiction"
 `book0-remote` + `book0_api` section below for the full explanation.
 
 An empty library prints `No books found.` (or `No authors found.` for `authors`, or
-`No publishers found.` for `publishers`). A missing
+`No publishers found.` for `publishers`; `books-detail` prints `No book details found.` when
+none of the requested ids match). A missing
 path or a file that isn't a Calibre library, no config file found for a given `--tag`, or a
 config file found that doesn't list that tag, all print a one-line error to stderr and exit
 with status 1. Unlike `book0-remote` (below), an unconfigured `--tag` is treated as an error
@@ -177,8 +178,8 @@ uv run book0-remote publishers --server http://127.0.0.1:8000 --tag fiction
 uv run book0-remote books-detail --ids 1,2,3 --server http://127.0.0.1:8000 --tag fiction
 ```
 
-Same table output, same `No books found.` / `No authors found.` / `No publishers found.` for
-an empty library. A tag
+Same table output, same `No books found.` / `No authors found.` / `No publishers found.` /
+`No book details found.` for an empty library. A tag
 that isn't configured on the server behaves like an empty library rather than an error. A
 configured-but-broken library on the server (missing file, not a Calibre library) or an
 unreachable server both print a one-line error to stderr and exit with status 1.
