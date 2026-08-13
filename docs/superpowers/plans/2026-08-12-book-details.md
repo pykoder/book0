@@ -76,7 +76,15 @@ id-typed field in this plan is `str` from the start.
 Append to `tests/unit/test_models.py`, changing the import line:
 
 ```python
-from book0_core.models import Author, Book, BookDetails, BookDetailsResult, Publisher, Series, SeriesItem
+from book0_core.models import (
+    Author,
+    Book,
+    BookDetails,
+    BookDetailsResult,
+    Publisher,
+    Series,
+    SeriesItem,
+)
 ```
 
 ```python
@@ -547,7 +555,15 @@ In `src/book0_core/sqlite_gateway.py`, change the model import and add the query
 after `_LIST_PUBLISHERS_QUERY`:
 
 ```python
-from book0_core.models import Author, Book, BookDetails, BookDetailsResult, Publisher, Series, SeriesItem
+from book0_core.models import (
+    Author,
+    Book,
+    BookDetails,
+    BookDetailsResult,
+    Publisher,
+    Series,
+    SeriesItem,
+)
 ```
 
 ```python
@@ -954,9 +970,7 @@ def test_get_book_details_returns_expected_details_for_a_known_tag(
     app = create_app({"fiction": calibre_metadata_db})
     client = TestClient(app)
 
-    response = client.post(
-        "/libraries/fiction/books/detail", json={"ids": ["1"]}
-    )
+    response = client.post("/libraries/fiction/books/detail", json={"ids": ["1"]})
 
     assert response.status_code == 200
     body = response.json()
@@ -1013,9 +1027,7 @@ def test_get_book_details_returns_404_when_configured_path_is_missing(
     app = create_app({"fiction": tmp_path / "does-not-exist.db"})
     client = TestClient(app)
 
-    response = client.post(
-        "/libraries/fiction/books/detail", json={"ids": ["1"]}
-    )
+    response = client.post("/libraries/fiction/books/detail", json={"ids": ["1"]})
 
     assert response.status_code == 404
     assert response.json()["error"] == "LibraryNotFoundError"
@@ -1034,9 +1046,7 @@ def test_get_book_details_returns_500_when_configured_path_is_not_a_calibre_libr
     app = create_app({"fiction": db_path})
     client = TestClient(app)
 
-    response = client.post(
-        "/libraries/fiction/books/detail", json={"ids": ["1"]}
-    )
+    response = client.post("/libraries/fiction/books/detail", json={"ids": ["1"]})
 
     assert response.status_code == 500
     assert response.json()["error"] == "NotACalibreLibraryError"
@@ -1062,29 +1072,27 @@ from book0_api.schemas import (
 ```
 
 ```python
-    @app.post("/libraries/{tag}/books/detail", response_model=None)
-    def get_book_details(
-        tag: str, body: BookIdsIn
-    ) -> BookDetailsResultOut | JSONResponse:
-        db_path = libraries.get(tag)
-        if db_path is None:
-            return BookDetailsResultOut(books=[], missing_ids=body.ids)
+@app.post("/libraries/{tag}/books/detail", response_model=None)
+def get_book_details(tag: str, body: BookIdsIn) -> BookDetailsResultOut | JSONResponse:
+    db_path = libraries.get(tag)
+    if db_path is None:
+        return BookDetailsResultOut(books=[], missing_ids=body.ids)
 
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            result = gateway.get_book_details(body.ids)
-        except LibraryNotFoundError as error:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "LibraryNotFoundError", "detail": str(error)},
-            )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
-            )
+    gateway = SqliteLibraryGateway(db_path)
+    try:
+        result = gateway.get_book_details(body.ids)
+    except LibraryNotFoundError as error:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "LibraryNotFoundError", "detail": str(error)},
+        )
+    except NotACalibreLibraryError as error:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "NotACalibreLibraryError", "detail": str(error)},
+        )
 
-        return BookDetailsResultOut.from_book_details_result(result)
+    return BookDetailsResultOut.from_book_details_result(result)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -1202,7 +1210,15 @@ In `src/book0_cli_remote/http_gateway.py`, change the model import and add a mod
 helper plus the method after `list_publishers`:
 
 ```python
-from book0_core.models import Author, Book, BookDetails, BookDetailsResult, Publisher, Series, SeriesItem
+from book0_core.models import (
+    Author,
+    Book,
+    BookDetails,
+    BookDetailsResult,
+    Publisher,
+    Series,
+    SeriesItem,
+)
 ```
 
 ```python
@@ -1335,8 +1351,7 @@ def test_render_book_details_table_aligns_columns_with_headers():
 
     assert lines[0] == "ID Title Authors Publisher Series Series Index Tags Pub Date"
     assert lines[1] == (
-        "1 Dune Frank Herbert Ace Books Dune Chronicles 1.0 "
-        "sci-fi & classic 1965-08-01"
+        "1 Dune Frank Herbert Ace Books Dune Chronicles 1.0 sci-fi & classic 1965-08-01"
     )
     assert lines[2] == "2 The Hobbit J.R.R. Tolkien"
 
@@ -1500,7 +1515,9 @@ def test_run_reports_missing_ids_for_book_details(
 
     assert exit_code == 0
     captured = capsys.readouterr().out
-    assert captured == render_book_details_table([DUNE_DETAILS]) + "\nMissing ids: 999\n"
+    assert (
+        captured == render_book_details_table([DUNE_DETAILS]) + "\nMissing ids: 999\n"
+    )
 
 
 def test_run_prints_no_book_details_found_when_all_ids_are_unknown(
@@ -1517,9 +1534,7 @@ def test_run_prints_no_book_details_found_when_all_ids_are_unknown(
     exit_code = run(["books-detail", "--ids", "999", "--tag", "fiction"])
 
     assert exit_code == 0
-    assert (
-        capsys.readouterr().out == "No book details found.\nMissing ids: 999\n"
-    )
+    assert capsys.readouterr().out == "No book details found.\nMissing ids: 999\n"
 
 
 def test_run_treats_empty_ids_as_an_empty_request(
@@ -1710,7 +1725,9 @@ def test_run_reports_missing_ids_for_book_details(
 
     assert exit_code == 0
     captured = capsys.readouterr().out
-    assert captured == render_book_details_table([DUNE_DETAILS]) + "\nMissing ids: 999\n"
+    assert (
+        captured == render_book_details_table([DUNE_DETAILS]) + "\nMissing ids: 999\n"
+    )
 
 
 def test_run_reports_all_ids_missing_for_an_unconfigured_tag(
@@ -1792,24 +1809,22 @@ _SUBCOMMANDS = ("books", "authors", "publishers", "books-detail")
 ```
 
 ```python
-            if args.command == "authors":
-                print(render_author_table(gateway.list_authors()))
-            elif args.command == "publishers":
-                print(render_publisher_table(gateway.list_publishers()))
-            elif args.command == "books-detail":
-                ids = args.ids.split(",") if args.ids else []
-                result = gateway.get_book_details(ids)
-                books_by_id = {book.id: book for book in result.books}
-                ordered_books = [
-                    books_by_id[requested_id]
-                    for requested_id in ids
-                    if requested_id in books_by_id
-                ]
-                print(render_book_details_table(ordered_books))
-                if result.missing_ids:
-                    print(f"Missing ids: {', '.join(result.missing_ids)}")
-            else:
-                print(render_book_table(gateway.list_books()))
+if args.command == "authors":
+    print(render_author_table(gateway.list_authors()))
+elif args.command == "publishers":
+    print(render_publisher_table(gateway.list_publishers()))
+elif args.command == "books-detail":
+    ids = args.ids.split(",") if args.ids else []
+    result = gateway.get_book_details(ids)
+    books_by_id = {book.id: book for book in result.books}
+    ordered_books = [
+        books_by_id[requested_id] for requested_id in ids if requested_id in books_by_id
+    ]
+    print(render_book_details_table(ordered_books))
+    if result.missing_ids:
+        print(f"Missing ids: {', '.join(result.missing_ids)}")
+else:
+    print(render_book_table(gateway.list_books()))
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**

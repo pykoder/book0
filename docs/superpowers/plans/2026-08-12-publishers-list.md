@@ -603,18 +603,16 @@ from book0_core.models import Author, Book, Publisher
 ```
 
 ```python
-    def list_publishers(self) -> list[Publisher]:
-        response = self._client.get(f"/libraries/{self._tag}/publishers")
+def list_publishers(self) -> list[Publisher]:
+    response = self._client.get(f"/libraries/{self._tag}/publishers")
 
-        if response.status_code in (404, 500):
-            body = response.json()
-            error_type = _ERROR_TYPES[body["error"]]
-            raise error_type(body["detail"])
-        response.raise_for_status()
+    if response.status_code in (404, 500):
+        body = response.json()
+        error_type = _ERROR_TYPES[body["error"]]
+        raise error_type(body["detail"])
+    response.raise_for_status()
 
-        return [
-            Publisher(id=row["id"], name=row["name"]) for row in response.json()
-        ]
+    return [Publisher(id=row["id"], name=row["name"]) for row in response.json()]
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -730,7 +728,11 @@ Add `CALIBRE_LIBRARY_PUBLISHERS` to the existing import line and the renderer im
 `tests/integration/test_cli_main.py`:
 
 ```python
-from book0_presentation.tables import render_author_table, render_book_table, render_publisher_table
+from book0_presentation.tables import (
+    render_author_table,
+    render_book_table,
+    render_publisher_table,
+)
 from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
@@ -830,7 +832,11 @@ Expected: FAIL — `run(["publishers"])` exits 2 (argparse: invalid choice), and
 In `src/book0_cli/main.py`:
 
 ```python
-from book0_presentation.tables import render_author_table, render_book_table, render_publisher_table
+from book0_presentation.tables import (
+    render_author_table,
+    render_book_table,
+    render_publisher_table,
+)
 
 _SUBCOMMANDS = ("books", "authors", "publishers")
 ```
@@ -887,7 +893,11 @@ Add `CALIBRE_LIBRARY_PUBLISHERS` to the existing import line and the renderer im
 `tests/integration/test_cli_remote_main.py`:
 
 ```python
-from book0_presentation.tables import render_author_table, render_book_table, render_publisher_table
+from book0_presentation.tables import (
+    render_author_table,
+    render_book_table,
+    render_publisher_table,
+)
 from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
@@ -948,7 +958,11 @@ Expected: FAIL — `run(["publishers", ...])` exits 2 (argparse: invalid choice)
 In `src/book0_cli_remote/main.py`:
 
 ```python
-from book0_presentation.tables import render_author_table, render_book_table, render_publisher_table
+from book0_presentation.tables import (
+    render_author_table,
+    render_book_table,
+    render_publisher_table,
+)
 
 _SUBCOMMANDS = ("books", "authors", "publishers")
 ```
