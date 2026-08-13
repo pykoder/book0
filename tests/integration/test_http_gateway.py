@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 
 from book0_api.main import create_app
 from book0_cli_remote.http_gateway import HttpLibraryGateway
-from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
+from book0_core.errors import (
+    LibraryNotFoundError,
+    NotACalibreLibraryError,
+    TagRequiredError,
+)
 from book0_core.gateway import LibraryGateway
 from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
@@ -19,8 +23,10 @@ from tests.conftest import (
 )
 
 
-def _client_for(libraries: dict[str, Path]) -> httpx.Client:
-    return TestClient(create_app(libraries))
+def _client_for(
+    libraries: dict[str, Path], default_tag: str | None = None
+) -> httpx.Client:
+    return TestClient(create_app(libraries, default_tag))
 
 
 def test_list_books_returns_expected_books_for_a_known_tag(calibre_metadata_db: Path):
@@ -147,6 +153,25 @@ def test_http_gateway_satisfies_the_library_gateway_protocol(
     gateway: LibraryGateway = HttpLibraryGateway(client, "fiction")
 
     assert gateway.list_publishers() == CALIBRE_LIBRARY_PUBLISHERS
+
+
+def test_list_books_uses_server_side_default_tag_when_tag_is_omitted(
+    calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": calibre_metadata_db}, default_tag="fiction")
+    gateway = HttpLibraryGateway(client, None)
+
+    assert gateway.list_books() == CALIBRE_LIBRARY_BOOKS
+
+
+def test_list_books_raises_tag_required_error_when_no_default_configured(
+    calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, None)
+
+    with pytest.raises(TagRequiredError):
+        gateway.list_books()
 
 
 def test_get_book_details_returns_expected_details_for_a_known_tag(

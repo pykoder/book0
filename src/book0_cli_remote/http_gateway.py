@@ -1,6 +1,10 @@
 import httpx
 
-from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
+from book0_core.errors import (
+    LibraryNotFoundError,
+    NotACalibreLibraryError,
+    TagRequiredError,
+)
 from book0_core.models import (
     Author,
     Book,
@@ -14,6 +18,7 @@ from book0_core.models import (
 _ERROR_TYPES = {
     "LibraryNotFoundError": LibraryNotFoundError,
     "NotACalibreLibraryError": NotACalibreLibraryError,
+    "TagRequiredError": TagRequiredError,
 }
 
 
@@ -48,14 +53,17 @@ def _book_details_from_json(row: dict[str, object]) -> BookDetails:
 
 
 class HttpLibraryGateway:
-    def __init__(self, client: httpx.Client, tag: str) -> None:
+    def __init__(self, client: httpx.Client, tag: str | None) -> None:
         self._client = client
         self._tag = tag
 
-    def list_books(self) -> list[Book]:
-        response = self._client.get(f"/libraries/{self._tag}/books")
+    def _params(self) -> dict[str, str]:
+        return {"tag": self._tag} if self._tag is not None else {}
 
-        if response.status_code in (404, 500):
+    def list_books(self) -> list[Book]:
+        response = self._client.get("/libraries/books", params=self._params())
+
+        if response.status_code in (400, 404, 500):
             body = response.json()
             error_type = _ERROR_TYPES[body["error"]]
             raise error_type(body["detail"])
@@ -72,9 +80,9 @@ class HttpLibraryGateway:
         ]
 
     def list_authors(self) -> list[Author]:
-        response = self._client.get(f"/libraries/{self._tag}/authors")
+        response = self._client.get("/libraries/authors", params=self._params())
 
-        if response.status_code in (404, 500):
+        if response.status_code in (400, 404, 500):
             body = response.json()
             error_type = _ERROR_TYPES[body["error"]]
             raise error_type(body["detail"])
@@ -83,9 +91,9 @@ class HttpLibraryGateway:
         return [Author(id=row["id"], name=row["name"]) for row in response.json()]
 
     def list_publishers(self) -> list[Publisher]:
-        response = self._client.get(f"/libraries/{self._tag}/publishers")
+        response = self._client.get("/libraries/publishers", params=self._params())
 
-        if response.status_code in (404, 500):
+        if response.status_code in (400, 404, 500):
             body = response.json()
             error_type = _ERROR_TYPES[body["error"]]
             raise error_type(body["detail"])
@@ -95,10 +103,10 @@ class HttpLibraryGateway:
 
     def get_book_details(self, ids: list[str]) -> BookDetailsResult:
         response = self._client.post(
-            f"/libraries/{self._tag}/books/detail", json={"ids": ids}
+            "/libraries/books/detail", params=self._params(), json={"ids": ids}
         )
 
-        if response.status_code in (404, 500):
+        if response.status_code in (400, 404, 500):
             body = response.json()
             error_type = _ERROR_TYPES[body["error"]]
             raise error_type(body["detail"])
