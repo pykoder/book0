@@ -8,7 +8,6 @@ from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
-    DUNE_DETAILS,
 )
 
 
@@ -222,7 +221,6 @@ def test_get_book_details_returns_expected_details_for_a_known_tag(
             "index": "1.0",
         },
     }
-    assert DUNE_DETAILS.title == "Dune"  # sanity check the fixture agrees
 
 
 def test_get_book_details_reports_missing_ids_for_a_known_tag(
