@@ -4,3 +4,7 @@ class LibraryNotFoundError(Exception):
 
 class NotACalibreLibraryError(Exception):
     pass
+
+
+class TagRequiredError(Exception):
+    pass
