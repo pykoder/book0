@@ -30,6 +30,18 @@
 - **Cross-cutting goal**: every change must reduce or hold technical debt, never increase it,
   even under deadline pressure.
 
+## Deferred work
+
+`docs/superpowers/TODO.md` tracks work deliberately deferred during brainstorming, code
+review, or implementation - bugs identified but not fixed, future directions raised but not
+designed, anything explicitly put off rather than actioned. Before starting brainstorming on a
+new subject, check it: if any open item looks related to the new subject, or to another open
+item, mention it and ask whether to consider them together rather than silently proceeding as
+if it weren't there - do not merge or combine items automatically, that decision is made fresh
+each time. Brainstorming appends a new line when a design doc's "Out of scope" section defers
+something concrete enough to act on later. The commit or plan that actually resolves an item
+removes its line - do not let resolved items linger.
+
 ## Tooling: uv only
 
 This project is run and managed with **[uv](https://docs.astral.sh/uv/)**. Every Python or
