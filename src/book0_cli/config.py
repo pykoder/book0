@@ -5,10 +5,6 @@ LOCAL_CONFIG_FILENAME = ".book0.toml"
 _XDG_CONFIG_SUBPATH = Path("book0") / "config.toml"
 
 
-def default_library_path() -> Path:
-    return Path.home() / "Calibre Library"
-
-
 def xdg_config_path() -> Path:
     xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
     config_home = Path(xdg_config_home) if xdg_config_home else Path.home() / ".config"

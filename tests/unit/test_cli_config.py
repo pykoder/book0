@@ -2,15 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from book0_cli.config import default_library_path, find_config_file, xdg_config_path
-
-
-def test_default_library_path_is_calibre_library_under_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-    assert default_library_path() == tmp_path / "Calibre Library"
+from book0_cli.config import find_config_file, xdg_config_path
 
 
 def test_xdg_config_path_uses_xdg_config_home_when_set(
