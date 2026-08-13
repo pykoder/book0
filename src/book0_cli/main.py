@@ -2,14 +2,13 @@ import argparse
 import sys
 import tomllib
 
-from book0_cli.config import (
-    LOCAL_CONFIG_FILENAME,
-    default_library_path,
-    find_config_file,
-    xdg_config_path,
-)
+from book0_cli.config import LOCAL_CONFIG_FILENAME, find_config_file, xdg_config_path
 from book0_config.config import load_libraries
-from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
+from book0_core.errors import (
+    LibraryNotFoundError,
+    NotACalibreLibraryError,
+    TagRequiredError,
+)
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 from book0_presentation.tables import (
     format_missing_ids_message,
@@ -23,7 +22,7 @@ from book0_presentation.tables import (
 _SUBCOMMANDS = ("books", "authors", "publishers", "books-detail")
 _TAG_HELP = (
     "library tag to look up in a .book0.toml config file; "
-    "omit to use Calibre's default library"
+    "omit to use the config file's default-library, if set"
 )
 
 
@@ -61,33 +60,35 @@ def run(argv: list[str] | None = None) -> int:
     raw_argv = sys.argv[1:] if argv is None else argv
     args = _build_parser().parse_args(_normalize_argv(raw_argv))
 
-    if args.tag is None:
-        library_path = default_library_path()
-    else:
-        config_path = find_config_file()
-        if config_path is None:
-            print(
-                f"No book0 config file found (looked for ./{LOCAL_CONFIG_FILENAME} "
-                f"and {xdg_config_path()})",
-                file=sys.stderr,
-            )
-            return 1
-
-        try:
-            libraries = load_libraries(config_path)
-        except (tomllib.TOMLDecodeError, KeyError) as error:
-            print(f"Invalid book0 config file {config_path}: {error}", file=sys.stderr)
-            return 1
-
-        tagged_library_path = libraries.get(args.tag)
-        if tagged_library_path is None:
-            print(f"Unknown library tag: {args.tag!r}", file=sys.stderr)
-            return 1
-        library_path = tagged_library_path
-
-    gateway = SqliteLibraryGateway(library_path)
+    config_path = find_config_file()
+    if config_path is None:
+        print(
+            f"No book0 config file found (looked for ./{LOCAL_CONFIG_FILENAME} "
+            f"and {xdg_config_path()})",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
+        config = load_libraries(config_path)
+    except (tomllib.TOMLDecodeError, KeyError) as error:
+        print(f"Invalid book0 config file {config_path}: {error}", file=sys.stderr)
+        return 1
+
+    try:
+        tag = args.tag if args.tag is not None else config.default_tag
+        if tag is None:
+            raise TagRequiredError(
+                f"No --tag given and no default-library configured in {config_path}"
+            )
+
+        library_path = config.libraries.get(tag)
+        if library_path is None:
+            print(f"Unknown library tag: {tag!r}", file=sys.stderr)
+            return 1
+
+        gateway = SqliteLibraryGateway(library_path)
+
         if args.command == "authors":
             print(render_author_table(gateway.list_authors()))
         elif args.command == "publishers":
@@ -102,7 +103,7 @@ def run(argv: list[str] | None = None) -> int:
                 print(missing_ids_message)
         else:
             print(render_book_table(gateway.list_books()))
-    except (LibraryNotFoundError, NotACalibreLibraryError) as error:
+    except (LibraryNotFoundError, NotACalibreLibraryError, TagRequiredError) as error:
         print(str(error), file=sys.stderr)
         return 1
 
