@@ -64,14 +64,16 @@ def test_run_reports_no_default_tag_configured_on_stderr_and_exits_with_status_1
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    _write_config(tmp_path / ".book0.toml", "fiction", tmp_path / "fiction.db")
+    config_path = tmp_path / ".book0.toml"
+    _write_config(config_path, "fiction", tmp_path / "fiction.db")
 
     exit_code = run([])
 
     captured = capsys.readouterr()
     assert exit_code == 1
     assert captured.out == ""
-    assert captured.err.strip() != ""
+    assert "default-library" in captured.err
+    assert str(config_path) in captured.err
 
 
 def test_run_prints_table_when_tag_resolves_via_local_config_file(

@@ -270,4 +270,6 @@ def test_run_reports_tag_required_error_on_stderr_and_exits_with_status_1(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert captured.out == ""
-    assert captured.err.strip() != ""
+    assert "No tag given and no default-library configured for this server" in (
+        captured.err
+    )

@@ -174,6 +174,18 @@ def test_list_books_raises_tag_required_error_when_no_default_configured(
         gateway.list_books()
 
 
+def test_get_book_details_uses_server_side_default_tag_when_tag_is_omitted(
+    calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": calibre_metadata_db}, default_tag="fiction")
+    gateway = HttpLibraryGateway(client, None)
+
+    result = gateway.get_book_details(["1"])
+
+    assert result.books == (DUNE_DETAILS,)
+    assert result.missing_ids == ()
+
+
 def test_get_book_details_returns_expected_details_for_a_known_tag(
     calibre_metadata_db: Path,
 ):
