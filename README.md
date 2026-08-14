@@ -24,8 +24,8 @@ This creates `.venv/` and installs all three console scripts (`book0`, `book0-re
 
 ## `book0` - direct CLI
 
-Point it at a library by tag (configured via `./.book0.toml`, or `~/.config/book0/config.toml` / `$XDG_CONFIG_HOME/book0/config.toml` as fallback), or use no flag to read
-Calibre's own default library. Choose `books`, `authors`, `publishers`, or `books-detail` -
+Point it at a library by tag (configured via `./.book0.toml`, or `~/.config/book0/config.toml` / `$XDG_CONFIG_HOME/book0/config.toml` as fallback), or omit `--tag` to use the config
+file's `default-library`, if set. Choose `books`, `authors`, `publishers`, or `books-detail` -
 `books` is the default:
 
 ```sh
@@ -34,7 +34,7 @@ uv run book0 authors --tag <tag>
 uv run book0 publishers --tag <tag>
 uv run book0 books-detail --ids 1,2,3 --tag <tag>
 # or, with no --tag:
-uv run book0                        # reads Calibre's default library (books)
+uv run book0                        # uses the config file's default-library (books)
 ```
 
 ```
@@ -64,20 +64,26 @@ table (or on its own, if none of the requested ids were found) instead.
 `book0-libraries.toml`:
 
 ```toml
+default-library = "fiction"
+
 [libraries]
 fiction = "/path/to/fiction"
 ```
+
+`default-library` is optional - it names the tag `book0` uses when `--tag` is omitted. Leave
+it out and an omitted `--tag` is an error (see below).
 
 `${VAR_NAME}` placeholders are expanded against the environment here too - see the
 `book0-remote` + `book0_api` section below for the full explanation.
 
 An empty library prints `No books found.` (or `No authors found.` for `authors`, or
 `No publishers found.` for `publishers`; `books-detail` prints `No book details found.` when
-none of the requested ids match). A missing
-path or a file that isn't a Calibre library, no config file found for a given `--tag`, or a
-config file found that doesn't list that tag, all print a one-line error to stderr and exit
-with status 1. Unlike `book0-remote` (below), an unconfigured `--tag` is treated as an error
-here, not as an empty library.
+none of the requested ids match). A missing path or a file that isn't a Calibre library, no config file found at all (a config
+file is required whether or not `--tag` is given, since it also supplies `default-library`), a
+config file found that doesn't list the resolved tag, or `--tag` omitted with no
+`default-library` set in the config file, all print a one-line error to stderr and exit with
+status 1. Unlike `book0-remote` (below), an unconfigured tag is treated as an error here, not
+as an empty library.
 
 ## `book0-remote` + `book0_api` - HTTP-backed CLI
 
@@ -85,9 +91,12 @@ here, not as an empty library.
 
 `book0_api` serves one or more libraries, each identified by a short tag you choose. The
 mapping from tag to library path is a TOML file passed via `--config` - same `[libraries]`
-shape as `book0`'s own `.book0.toml` (see above), so either CLI can read the same file. Each
-value can be a library's directory (`book0_api` appends `metadata.db` itself, just like
-`book0` does) or a `metadata.db` file path directly.
+shape (including the optional `default-library` key) as `book0`'s own `.book0.toml` (see
+above), so either CLI can read the same file. Each value can be a library's directory
+(`book0_api` appends `metadata.db` itself, just like `book0` does) or a `metadata.db` file
+path directly. A `default-library` set here is used server-side whenever a `book0-remote`
+request omits `--tag` - it is independent of any `default-library` in a `book0` client's own
+`.book0.toml`.
 
 The committed template, `book0-libraries.toml`, holds `${VAR_NAME}` placeholders instead of
 real paths (safe to commit - no real filesystem paths in the repo). Set the env vars it
@@ -176,13 +185,17 @@ uv run book0-remote books --server http://127.0.0.1:8000 --tag fiction
 uv run book0-remote authors --server http://127.0.0.1:8000 --tag fiction
 uv run book0-remote publishers --server http://127.0.0.1:8000 --tag fiction
 uv run book0-remote books-detail --ids 1,2,3 --server http://127.0.0.1:8000 --tag fiction
+# or, with no --tag - relies on the *server's* configured default-library, not any
+# client-side setting:
+uv run book0-remote --server http://127.0.0.1:8000
 ```
 
 Same table output, same `No books found.` / `No authors found.` / `No publishers found.` /
 `No book details found.` for an empty library. A tag
 that isn't configured on the server behaves like an empty library rather than an error. A
-configured-but-broken library on the server (missing file, not a Calibre library) or an
-unreachable server both print a one-line error to stderr and exit with status 1.
+configured-but-broken library on the server (missing file, not a Calibre library), `--tag`
+omitted with no `default-library` configured on the server, or an unreachable server all print
+a one-line error to stderr and exit with status 1.
 
 ## Development
 

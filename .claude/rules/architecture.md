@@ -37,16 +37,23 @@ src/
 │                                    # format_missing_ids_message(missing_ids) -> str | None,
 │                                    # shared by both CLIs' books-detail dispatch
 ├── book0_config/
-│   └── config.py                  # load_libraries(path) -> dict[str, Path], reads a TOML file;
-│                                    # shared by book0_cli and book0_api
+│   └── config.py                  # load_libraries(path) -> LibraryConfig (libraries:
+│                                    # dict[str, Path], default_tag: str | None), reads a TOML
+│                                    # file (default_tag from an optional top-level
+│                                    # `default-library` key); shared by book0_cli and book0_api
 ├── book0_cli/
 │   ├── config.py                  # default_library_path(), xdg_config_path(), find_config_file()
 │   └── main.py                    # `book0` entry point: `books`/`authors`/`publishers`/
 │                                    # `books-detail` subcommands (books is the default), --tag
-│                                    # TAG (optional), --ids (books-detail only, required)
-│                                    # -> SqliteLibraryGateway
+│                                    # TAG (optional, falls back to config's default_tag; raises
+│                                    # TagRequiredError if neither is set), --ids (books-detail
+│                                    # only, required) -> SqliteLibraryGateway
 ├── book0_api/
-│   ├── main.py                    # create_app(libraries: dict[str, Path]) -> FastAPI
+│   ├── main.py                    # create_app(libraries: dict[str, Path], default_tag:
+│   │                                # str | None = None) -> FastAPI; routes take `tag` as an
+│   │                                # optional `?tag=...` query parameter (not a `{tag}` path
+│   │                                # segment), falling back to default_tag, raising
+│   │                                # TagRequiredError (mapped to 400) if neither is set
 │   ├── asgi.py                    # `app` wired from CONFIG_ENV_VAR (BOOK0_API_CONFIG) - the
 │   │                                # real uvicorn import target ("book0_api.asgi:app")
 │   ├── cli.py                     # `book0-api` entry point: --config PATH (required), --reload,
@@ -62,7 +69,9 @@ src/
 └── book0_cli_remote/
     ├── main.py                    # `book0-remote` entry point: `books`/`authors`/`publishers`/
     │                                `books-detail` subcommands (books is the default),
-    │                                --server URL --tag TAG (both required), --ids
+    │                                --server URL (required), --tag TAG (optional - an omitted
+    │                                tag is sent to the server as no `tag` query parameter, and
+    │                                book0_api resolves its own server-side default_tag), --ids
     │                                (books-detail only, required) -> HttpLibraryGateway
     └── http_gateway.py             # HttpLibraryGateway: implements LibraryGateway over HTTP
 tests/
@@ -101,8 +110,9 @@ CLIs' tests all build on it rather than each defining their own fixture DB.
 - Nothing depends on `book0_cli` or `book0_cli_remote` - both are leaf packages, and neither
   depends on the other. Each has its own full `main.py`; the only thing that differs between
   them, behaviorally, is which `LibraryGateway` implementation gets constructed and which
-  flags feed it (`--tag TAG`, optional and defaulting to Calibre's own default library path,
-  vs. `--server URL --tag TAG`, both required). Neither CLI shares a run loop with the other -
+  flags feed it (`--tag TAG`, optional and falling back to the config file's `default-library`,
+  vs. `--server URL` (required) `--tag TAG` (optional, server resolves its own
+  `default-library`)). Neither CLI shares a run loop with the other -
   there is no shared run-loop function between them. That was a deliberate choice, not an
   oversight, so do not "DRY them up" into one without a task that asks for it.
 - Code that talks to `metadata.db` (SQL, `sqlite3.connect`, schema assumptions, the
