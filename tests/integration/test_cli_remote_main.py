@@ -205,6 +205,31 @@ def test_run_reports_missing_ids_for_book_details(
     )
 
 
+def test_run_dedupes_and_strips_whitespace_from_requested_book_detail_ids(
+    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        [
+            "books-detail",
+            "--ids",
+            "1, 1, 999",
+            "--server",
+            "unused",
+            "--tag",
+            "fiction",
+        ],
+        client=client,
+    )
+
+    assert exit_code == 0
+    captured = capsys.readouterr().out
+    assert (
+        captured == render_book_details_table([DUNE_DETAILS]) + "\nMissing ids: 999\n"
+    )
+
+
 def test_run_reports_all_ids_missing_for_an_unconfigured_tag(
     calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
 ):

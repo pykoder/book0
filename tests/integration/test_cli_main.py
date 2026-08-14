@@ -442,6 +442,26 @@ def test_run_reports_missing_ids_for_book_details(
     )
 
 
+def test_run_dedupes_and_strips_whitespace_from_requested_book_detail_ids(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", calibre_metadata_db)
+
+    exit_code = run(["books-detail", "--ids", "1, 1, 999", "--tag", "fiction"])
+
+    assert exit_code == 0
+    assert (
+        capsys.readouterr().out
+        == render_book_details_table([DUNE_DETAILS]) + "\nMissing ids: 999\n"
+    )
+
+
 def test_run_prints_no_book_details_found_when_all_ids_are_unknown(
     calibre_metadata_db: Path,
     tmp_path: Path,
