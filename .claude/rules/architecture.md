@@ -42,7 +42,7 @@ src/
 │                                    # file (default_tag from an optional top-level
 │                                    # `default-library` key); shared by book0_cli and book0_api
 ├── book0_cli/
-│   ├── config.py                  # default_library_path(), xdg_config_path(), find_config_file()
+│   ├── config.py                  # xdg_config_path(), find_config_file()
 │   └── main.py                    # `book0` entry point: `books`/`authors`/`publishers`/
 │                                    # `books-detail` subcommands (books is the default), --tag
 │                                    # TAG (optional, falls back to config's default_tag; raises
@@ -110,9 +110,9 @@ CLIs' tests all build on it rather than each defining their own fixture DB.
 - Nothing depends on `book0_cli` or `book0_cli_remote` - both are leaf packages, and neither
   depends on the other. Each has its own full `main.py`; the only thing that differs between
   them, behaviorally, is which `LibraryGateway` implementation gets constructed and which
-  flags feed it (`--tag TAG`, optional and falling back to the config file's `default-library`,
-  vs. `--server URL` (required) `--tag TAG` (optional, server resolves its own
-  `default-library`)). Neither CLI shares a run loop with the other -
+  flags feed it: `--tag TAG` (optional, falling back to the config file's `default-library`)
+  for `book0`, vs. `--server URL` (required) and `--tag TAG` (optional, server resolves its
+  own `default-library`) for `book0-remote`. Neither CLI shares a run loop with the other -
   there is no shared run-loop function between them. That was a deliberate choice, not an
   oversight, so do not "DRY them up" into one without a task that asks for it.
 - Code that talks to `metadata.db` (SQL, `sqlite3.connect`, schema assumptions, the
