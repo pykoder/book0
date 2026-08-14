@@ -45,3 +45,17 @@ concrete; the commit or plan that resolves an item removes its line.
   space" means for that tag. Raised as motivating context for the item above, not as a request
   to design the multi-library architecture itself — no design exists yet. Revisit via
   brainstorming when picked up.
+
+- [ ] **(undesigned) `books-detail` response projection + pagination.** Raised during
+  brainstorming for the id-normalization fix (2026-08-14) and deliberately split off rather
+  than folded in. The user's personal Calibre library can hold tens of thousands of books, so
+  `get_book_details`'s join cost genuinely matters, and a simple `--ids-only` boolean flag
+  isn't enough: concrete near-future needs include returning just found/missing ids, a book's
+  file path (possibly triggering a download), description/abstract text, and pagination over
+  large result sets — all without multiplying round-trips. Needs its own design: how a caller
+  specifies "which fields"/mode (fixed enum vs. open field-selection list), how pagination
+  composes with an `--ids`-scoped request, how a future file-path/download field and
+  description/abstract fit the same request/response shape, and whether real query-level
+  savings (skipping SQL joins per requested scope) requires forking `BookDetailsResult`'s
+  shape or the `LibraryGateway` Protocol itself. No design exists yet; revisit via
+  brainstorming when picked up.
