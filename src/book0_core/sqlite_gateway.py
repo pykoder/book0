@@ -187,7 +187,7 @@ class SqliteLibraryGateway:
                 continue
             seen.add(raw_id)
             deduped_ids.append(raw_id)
-            if _VALID_ID_PATTERN.match(raw_id):
+            if _VALID_ID_PATTERN.fullmatch(raw_id):
                 valid_ids.append(raw_id)
         return deduped_ids, valid_ids
 
