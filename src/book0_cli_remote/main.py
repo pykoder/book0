@@ -4,7 +4,11 @@ import sys
 import httpx
 
 from book0_cli_remote.http_gateway import HttpLibraryGateway
-from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
+from book0_core.errors import (
+    LibraryNotFoundError,
+    NotACalibreLibraryError,
+    TagRequiredError,
+)
 from book0_presentation.tables import (
     format_missing_ids_message,
     order_book_details_by_ids,
@@ -23,22 +27,22 @@ def _build_parser() -> argparse.ArgumentParser:
 
     books_parser = subparsers.add_parser("books")
     books_parser.add_argument("--server", required=True)
-    books_parser.add_argument("--tag", required=True)
+    books_parser.add_argument("--tag")
 
     authors_parser = subparsers.add_parser("authors")
     authors_parser.add_argument("--server", required=True)
-    authors_parser.add_argument("--tag", required=True)
+    authors_parser.add_argument("--tag")
 
     publishers_parser = subparsers.add_parser("publishers")
     publishers_parser.add_argument("--server", required=True)
-    publishers_parser.add_argument("--tag", required=True)
+    publishers_parser.add_argument("--tag")
 
     books_detail_parser = subparsers.add_parser("books-detail")
     books_detail_parser.add_argument(
         "--ids", required=True, help="comma-separated list of book ids"
     )
     books_detail_parser.add_argument("--server", required=True)
-    books_detail_parser.add_argument("--tag", required=True)
+    books_detail_parser.add_argument("--tag")
 
     return parser
 
@@ -76,7 +80,11 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
                     print(missing_ids_message)
             else:
                 print(render_book_table(gateway.list_books()))
-        except (LibraryNotFoundError, NotACalibreLibraryError) as error:
+        except (
+            LibraryNotFoundError,
+            NotACalibreLibraryError,
+            TagRequiredError,
+        ) as error:
             print(str(error), file=sys.stderr)
             return 1
         except (httpx.ConnectError, httpx.TimeoutException) as error:

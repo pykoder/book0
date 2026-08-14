@@ -245,3 +245,29 @@ def test_run_help_mentions_the_books_detail_subcommand(
 
     assert exc_info.value.code == 0
     assert "books-detail" in capsys.readouterr().out
+
+
+def test_run_uses_server_side_default_tag_when_tag_is_omitted(
+    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(
+        create_app({"fiction": calibre_metadata_db}, default_tag="fiction")
+    )
+
+    exit_code = run(["--server", "unused"], client=client)
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+
+
+def test_run_reports_tag_required_error_on_stderr_and_exits_with_status_1(
+    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(["--server", "unused"], client=client)
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
