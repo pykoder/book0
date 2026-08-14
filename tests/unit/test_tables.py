@@ -207,6 +207,23 @@ def test_order_book_details_by_ids_skips_ids_not_in_the_result():
     assert ordered == [dune]
 
 
+def test_order_book_details_by_ids_skips_duplicate_requested_ids():
+    dune = BookDetails(
+        id="1",
+        title="Dune",
+        pubdate=None,
+        authors=(),
+        tags=(),
+        publisher=None,
+        series=None,
+    )
+    result = BookDetailsResult(books=(dune,), missing_ids=())
+
+    ordered = order_book_details_by_ids(result, ["1", "1"])
+
+    assert ordered == [dune]
+
+
 def test_format_missing_ids_message_returns_none_when_empty():
     assert format_missing_ids_message(()) is None
 

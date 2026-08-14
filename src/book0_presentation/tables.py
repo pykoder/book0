@@ -97,9 +97,13 @@ def order_book_details_by_ids(
     result: BookDetailsResult, ids: list[str]
 ) -> list[BookDetails]:
     books_by_id = {book.id: book for book in result.books}
-    return [
-        books_by_id[requested_id] for requested_id in ids if requested_id in books_by_id
-    ]
+    seen: set[str] = set()
+    ordered: list[BookDetails] = []
+    for requested_id in ids:
+        if requested_id in books_by_id and requested_id not in seen:
+            seen.add(requested_id)
+            ordered.append(books_by_id[requested_id])
+    return ordered
 
 
 def format_missing_ids_message(missing_ids: tuple[str, ...]) -> str | None:
