@@ -90,8 +90,8 @@ These are the single source of truth for the project's hard "never" rules:
   consumer unchanged.
 - Never let `book0_api` return a raw `sqlite3.OperationalError` or unmapped 500 for a
   `book0_core` domain error it recognizes (`LibraryNotFoundError`,
-  `NotACalibreLibraryError`) - map it to the documented status code + error body so
-  `HttpLibraryGateway` can reconstruct the same exception client-side.
+  `NotACalibreLibraryError`, `TagRequiredError`) - map it to the documented status code +
+  error body so `HttpLibraryGateway` can reconstruct the same exception client-side.
 - Never invoke `python`, `pytest`, `ruff`, `mypy`, `uvicorn`, `fastapi`, etc. directly - always
   through `uv run <tool>` (see the tooling table above), so the locked, synced environment is
   always the one that runs.

@@ -18,3 +18,9 @@
 [libraries]
 fiction = "${FICTION_LIBRARY_PATH}"
 work = "${WORK_LIBRARY_PATH}"
+
+# Optional: name one of the tags above as the server-side default. When set,
+# clients (book0-remote) may omit --tag and the server resolves this tag on
+# their behalf; without it, an omitted --tag is rejected with a 400
+# TagRequiredError.
+# default-library = "fiction"

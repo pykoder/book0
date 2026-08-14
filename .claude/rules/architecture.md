@@ -20,7 +20,8 @@ src/
 │                                  # SeriesItem (series, index); BookDetails (id, title,
 │                                  # pubdate, authors, tags, publisher, series);
 │                                  # BookDetailsResult (books, missing_ids)
-│   ├── errors.py                # LibraryNotFoundError, NotACalibreLibraryError
+│   ├── errors.py                # LibraryNotFoundError, NotACalibreLibraryError,
+│                                  # TagRequiredError
 │   ├── gateway.py                # LibraryGateway(Protocol): list_books() -> list[Book],
 │                                    # list_authors() -> list[Author],
 │                                    # list_publishers() -> list[Publisher],

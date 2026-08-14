@@ -41,11 +41,12 @@ paths:
 - Type-hint every function signature (params + return); the codebase has no bare `Any`.
 - `book0_core.Book` is a frozen `dataclass` (`@dataclass(frozen=True)`), not a Pydantic model
   - there is no HTTP boundary inside `book0_core`. `book0_api.schemas.BookOut` is where
-    Pydantic earns its place: it is the actual wire format for `GET /libraries/{tag}/books`,
-    which is the first (and so far only) real HTTP boundary in this project.
+    Pydantic earns its place: it is the actual wire format for `GET /libraries/books`
+    (`tag` as a query parameter, not a path segment), which is the first (and so far only)
+    real HTTP boundary in this project.
 - Use `Path` (not `str`) for filesystem paths in function signatures; convert at the
   outermost layer only (`Path(os.environ[...])` in `book0_api/asgi.py`,
-  `Path.home() / "Calibre Library"` in `book0_cli/config.py::default_library_path`).
+  `Path(_expand_env_vars(path))` in `book0_config/config.py::load_libraries`).
 
 ## SQLite access
 
