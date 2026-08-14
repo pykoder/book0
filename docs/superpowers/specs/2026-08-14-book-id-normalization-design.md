@@ -90,12 +90,9 @@ class SqliteLibraryGateway:
         connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
         try:
             self._check_is_calibre_library(connection)
-            if valid_ids:
-                placeholders = ", ".join("?" for _ in valid_ids)
-                query = _GET_BOOK_DETAILS_QUERY_TEMPLATE.format(placeholders=placeholders)
-                rows = connection.execute(query, valid_ids).fetchall()
-            else:
-                rows = []
+            placeholders = ", ".join("?" for _ in valid_ids)
+            query = _GET_BOOK_DETAILS_QUERY_TEMPLATE.format(placeholders=placeholders)
+            rows = connection.execute(query, valid_ids).fetchall()
         finally:
             connection.close()
 
@@ -113,10 +110,11 @@ class SqliteLibraryGateway:
 invalid-format ids and valid-but-not-found ids into one tuple, in original first-seen request
 order, with no separate bookkeeping for "which kind of missing" needed.
 
-The `if valid_ids:` guard also incidentally fixes a latent, pre-existing edge case: an
-all-invalid (or empty) `--ids` value no longer executes `WHERE id IN ()`, which is invalid SQL
-today (reachable today via `--ids ""`, since `args.ids.split(",") if args.ids else []`
-produces `ids = []` in that case).
+No special-casing is needed for an empty `valid_ids` (e.g. `--ids` entirely invalid, or
+`--ids ""` which already produces `ids = []` today via `args.ids.split(",") if args.ids else
+[]`): `WHERE id IN ()` is valid SQL — confirmed directly against SQLite — and simply matches
+no rows, so the query executes exactly the same code path regardless of how many valid ids
+there are, `0` included.
 
 ## Error handling / edge cases
 
@@ -126,8 +124,8 @@ produces `ids = []` in that case).
   `missing_ids == ("01", "999")`, in original order.
 - `--ids "1,,2"` → the empty segment is silently dropped; it never appears in `deduped_ids`,
   `valid_ids`, or the rendered/missing output.
-- `--ids "abc,def"` (all invalid) → `books == ()`, `missing_ids == ("abc", "def")`, and no SQL
-  query is executed against an empty `IN (...)`.
+- `--ids "abc,def"` (all invalid) → `books == ()`, `missing_ids == ("abc", "def")`; the query
+  still runs with an empty `IN (...)`, which is valid SQL and simply matches nothing.
 - An id that is well-formed but simply doesn't exist in the library keeps today's exact
   behavior — it lands in `missing_ids`, same as always.
 
