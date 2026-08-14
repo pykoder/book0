@@ -94,7 +94,9 @@ def run(argv: list[str] | None = None) -> int:
         elif args.command == "publishers":
             print(render_publisher_table(gateway.list_publishers()))
         elif args.command == "books-detail":
-            ids = args.ids.split(",") if args.ids else []
+            ids = (
+                [segment.strip() for segment in args.ids.split(",")] if args.ids else []
+            )
             result = gateway.get_book_details(ids)
             ordered_books = order_book_details_by_ids(result, ids)
             print(render_book_details_table(ordered_books))
