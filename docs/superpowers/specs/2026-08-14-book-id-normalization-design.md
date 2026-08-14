@@ -13,8 +13,11 @@ during the book-details feature's final review (see `docs/superpowers/TODO.md`):
   output list from the raw, possibly-duplicated `--ids` value.
 
 This design fixes both, entirely inside the two places that actually own each problem —
-no new shared module, no `LibraryGateway` Protocol change, no `book0_api`/`book0_cli_remote`
-changes at all.
+no new shared module, no `LibraryGateway` Protocol change, no `book0_api` changes at all.
+Both CLIs' `--ids` parsing does need one small addition (see "Whitespace stripping" below),
+found during final review: once malformed ids are no longer silently aliased by SQLite, an
+unstripped space around a comma-separated id (`--ids "1, 2"`, a natural way to type it) would
+otherwise be reported as missing rather than matched.
 
 A related, larger idea came up during brainstorming — letting a caller control which fields
 `books-detail` returns at all (ids only, full detail, a file path, description text) plus
@@ -116,12 +119,47 @@ No special-casing is needed for an empty `valid_ids` (e.g. `--ids` entirely inva
 no rows, so the query executes exactly the same code path regardless of how many valid ids
 there are, `0` included.
 
+The validity regex uses `re.fullmatch` (not `re.match` with a `$`-anchored pattern) — Python's
+`$` matches immediately before a trailing `\n`, so `"1\n"` would otherwise slip past a
+`match()`-based check and still reach SQLite, where it aliases to id `"1"` exactly like the
+other malformed forms this fix closes. `fullmatch` requires the entire string to match, with
+no such exception.
+
+## Whitespace stripping
+
+Found during final review: once malformed ids stop being silently aliased, an *unstripped*
+space becomes one of the malformed forms — `--ids "1, 2"` (a natural way to type a
+comma-separated list) splits to `["1", " 2"]`, and `" 2"` now fails the validity regex and is
+reported missing instead of matching book 2, where before SQLite's own aliasing happened to
+paper over it. Both CLIs' id-splitting line changes from
+
+```python
+ids = args.ids.split(",") if args.ids else []
+```
+
+to
+
+```python
+ids = [segment.strip() for segment in args.ids.split(",")] if args.ids else []
+```
+
+in `src/book0_cli/main.py` and `src/book0_cli_remote/main.py`. This also means a segment that
+is *only* whitespace (`--ids "1, ,2"`) strips down to an empty string, which `_partition_ids`
+already drops silently — no additional handling needed. This is the one place this fix touches
+either CLI's own file; `HttpLibraryGateway`, `book0_api`, and the `LibraryGateway` Protocol
+remain untouched.
+
 ## Error handling / edge cases
 
 - `--ids "1,1,2"` → book 1 rendered once, not twice.
-- `--ids "01, 1, 999"` → `"01"` is its own distinct, never-found id (no longer silently
+- `--ids "01, 1, 999"` → each comma-separated segment is stripped of surrounding whitespace
+  before validation (see "Whitespace stripping"), so this is `["01", "1", "999"]`, not
+  `["01", " 1", " 999"]`; `"01"` is its own distinct, never-found id (no longer silently
   aliased to `"1"` by SQLite's numeric affinity); assuming `999` doesn't exist,
   `missing_ids == ("01", "999")`, in original order.
+- `--ids "1, 2"` → the space after the comma is stripped before reaching the gateway, so both
+  ids are found normally — a naturally-typed spaced list is not silently affected by the
+  stricter validity check.
 - `--ids "1,,2"` → the empty segment is silently dropped; it never appears in `deduped_ids`,
   `valid_ids`, or the rendered/missing output.
 - `--ids "abc,def"` (all invalid) → `books == ()`, `missing_ids == ("abc", "def")`; the query
@@ -143,6 +181,11 @@ there are, `0` included.
 - Existing `tests/integration/test_cli_main.py` / `test_cli_remote_main.py` books-detail tests
   are expected to pass unchanged — behavior for already-valid, non-duplicated, existing ids
   does not change.
+- `tests/integration/test_cli_main.py`: a new test drives `run(["books-detail", "--ids", ...])`
+  end to end with a duplicated and a whitespace-padded id in the same request, asserting both
+  that the CLI's rendered table has no duplicate row and that the spaced id is found rather
+  than reported missing — the composition of both fixes through the CLI's actual dispatch,
+  which neither fix's own layer-scoped tests exercise on their own.
 
 ## Out of scope
 
