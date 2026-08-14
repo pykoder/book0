@@ -1,3 +1,4 @@
+import re
 import sqlite3
 from pathlib import Path
 
@@ -69,6 +70,8 @@ _GET_BOOK_DETAILS_QUERY_TEMPLATE = """
 # calibre.utils.date.UNDEFINED_DATE) rather than SQL NULL.
 _UNDEFINED_PUBDATE_PREFIX = "0101-01-01"
 
+_VALID_ID_PATTERN = re.compile(r"^[1-9]\d*$")
+
 
 class SqliteLibraryGateway:
     def __init__(self, library_path: Path) -> None:
@@ -127,12 +130,14 @@ class SqliteLibraryGateway:
         if not self._db_path.exists():
             raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
 
+        deduped_ids, valid_ids = self._partition_ids(ids)
+
         connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
         try:
             self._check_is_calibre_library(connection)
-            placeholders = ", ".join("?" for _ in ids)
+            placeholders = ", ".join("?" for _ in valid_ids)
             query = _GET_BOOK_DETAILS_QUERY_TEMPLATE.format(placeholders=placeholders)
-            rows = connection.execute(query, ids).fetchall()
+            rows = connection.execute(query, valid_ids).fetchall()
         finally:
             connection.close()
 
@@ -164,8 +169,27 @@ class SqliteLibraryGateway:
                 )
             )
 
-        missing_ids = tuple(id_ for id_ in ids if id_ not in found_ids)
+        missing_ids = tuple(id_ for id_ in deduped_ids if id_ not in found_ids)
         return BookDetailsResult(books=tuple(books), missing_ids=missing_ids)
+
+    @staticmethod
+    def _partition_ids(raw_ids: list[str]) -> tuple[list[str], list[str]]:
+        """Dedupe (first-seen order, empty segments dropped); split into
+        (deduped_ids, valid_ids) using this backend's id format. deduped_ids
+        holds every distinct requested id in original order (valid and
+        invalid mixed); valid_ids is the subset safe to place in a SQL
+        IN (...) clause, in the same relative order."""
+        seen: set[str] = set()
+        deduped_ids: list[str] = []
+        valid_ids: list[str] = []
+        for raw_id in raw_ids:
+            if raw_id == "" or raw_id in seen:
+                continue
+            seen.add(raw_id)
+            deduped_ids.append(raw_id)
+            if _VALID_ID_PATTERN.match(raw_id):
+                valid_ids.append(raw_id)
+        return deduped_ids, valid_ids
 
     @staticmethod
     def _normalize_pubdate(pubdate: str | None) -> str | None:
