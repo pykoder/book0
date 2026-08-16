@@ -49,6 +49,7 @@ def _book_details_from_json(row: dict[str, object]) -> BookDetails:
         tags=tuple(row["tags"]),  # type: ignore[arg-type]
         publisher=publisher,
         series=series,
+        cover_path=row.get("cover_path"),  # type: ignore[arg-type]
     )
 
 

@@ -42,6 +42,7 @@ class BookDetails:
     tags: tuple[str, ...]
     publisher: Publisher | None
     series: SeriesItem | None
+    cover_path: str | None = None
 
 
 @dataclass(frozen=True)

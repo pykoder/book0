@@ -87,6 +87,7 @@ def test_from_book_details_converts_book_details_with_everything_populated():
         tags=("sci-fi", "classic"),
         publisher=Publisher(id="1", name="Ace Books"),
         series=SeriesItem(series=Series(id="1", name="Dune Chronicles"), index="1.0"),
+        cover_path="/library/Frank Herbert/Dune (1)/cover.jpg",
     )
 
     book_details_out = BookDetailsOut.from_book_details(book_details)
@@ -101,6 +102,7 @@ def test_from_book_details_converts_book_details_with_everything_populated():
         series=SeriesItemOut(
             series=SeriesOut(id="1", name="Dune Chronicles"), index="1.0"
         ),
+        cover_path="/library/Frank Herbert/Dune (1)/cover.jpg",
     )
 
 

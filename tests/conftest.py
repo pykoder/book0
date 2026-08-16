@@ -54,6 +54,7 @@ DUNE_DETAILS = BookDetails(
     tags=("sci-fi", "classic"),
     publisher=Publisher(id="1", name="Ace Books"),
     series=SeriesItem(series=Series(id="1", name="Dune Chronicles"), index="1.0"),
+    cover_path=None,
 )
 
 HOBBIT_DETAILS = BookDetails(
@@ -64,6 +65,7 @@ HOBBIT_DETAILS = BookDetails(
     tags=(),
     publisher=None,
     series=None,
+    cover_path=None,
 )
 
 GOOD_OMENS_DETAILS = BookDetails(
@@ -74,7 +76,51 @@ GOOD_OMENS_DETAILS = BookDetails(
     tags=("fantasy", "humor"),
     publisher=Publisher(id="2", name="Gollancz"),
     series=None,
+    cover_path=None,
 )
+
+# Expected BookDetails with absolute cover_path values, computed from a library root.
+def _expected_details_with_cover(
+    library_root: Path,
+) -> tuple[BookDetails, BookDetails, BookDetails]:
+    return (
+        BookDetails(
+            id="1",
+            title="Dune",
+            pubdate="1965-08-01",
+            authors=("Frank Herbert",),
+            tags=("sci-fi", "classic"),
+            publisher=Publisher(id="1", name="Ace Books"),
+            series=SeriesItem(
+                series=Series(id="1", name="Dune Chronicles"), index="1.0"
+            ),
+            cover_path=str(
+                library_root / "Frank Herbert/Dune (1)/cover.jpg"
+            ),
+        ),
+        BookDetails(
+            id="2",
+            title="The Hobbit",
+            pubdate=None,
+            authors=("J.R.R. Tolkien",),
+            tags=(),
+            publisher=None,
+            series=None,
+            cover_path=None,
+        ),
+        BookDetails(
+            id="3",
+            title="Good Omens",
+            pubdate="1990-05-01",
+            authors=("Neil Gaiman", "Terry Pratchett"),
+            tags=("fantasy", "humor"),
+            publisher=Publisher(id="2", name="Gollancz"),
+            series=None,
+            cover_path=str(
+                library_root / "Neil Gaiman/Good Omens (3)/cover.jpg"
+            ),
+        ),
+    )
 
 
 @pytest.fixture
@@ -88,7 +134,9 @@ def calibre_metadata_db(tmp_path: Path) -> Path:
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
                 pubdate TEXT,
-                series_index REAL
+                series_index REAL,
+                path TEXT,
+                has_cover INTEGER
             );
             CREATE TABLE authors (
                 id INTEGER PRIMARY KEY,
@@ -129,11 +177,12 @@ def calibre_metadata_db(tmp_path: Path) -> Path:
             """
         )
         connection.executemany(
-            "INSERT INTO books (id, title, pubdate, series_index) VALUES (?, ?, ?, ?)",
+            "INSERT INTO books (id, title, pubdate, series_index, path, has_cover)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
             [
-                (1, "Dune", "1965-08-01", 1.0),
-                (2, "The Hobbit", None, None),
-                (3, "Good Omens", "1990-05-01", None),
+                (1, "Dune", "1965-08-01", 1.0, "Frank Herbert/Dune (1)/", 1),
+                (2, "The Hobbit", None, None, "J.R.R. Tolkien/The Hobbit (2)/", 0),
+                (3, "Good Omens", "1990-05-01", None, "Neil Gaiman/Good Omens (3)/", 1),
             ],
         )
         connection.executemany(
@@ -185,3 +234,11 @@ def calibre_metadata_db(tmp_path: Path) -> Path:
     finally:
         connection.close()
     return db_path
+
+
+@pytest.fixture
+def expected_book_details(
+    calibre_metadata_db: Path,
+) -> tuple[BookDetails, BookDetails, BookDetails]:
+    """Expected BookDetails with absolute cover_path values for the fixture library."""
+    return _expected_details_with_cover(calibre_metadata_db.parent)

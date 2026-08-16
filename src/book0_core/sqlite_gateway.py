@@ -57,7 +57,9 @@ _GET_BOOK_DETAILS_QUERY_TEMPLATE = """
         publishers.id,
         publishers.name,
         series.id,
-        series.name
+        series.name,
+        books.path,
+        books.has_cover
     FROM books
     LEFT JOIN books_publishers_link ON books_publishers_link.book = books.id
     LEFT JOIN publishers ON publishers.id = books_publishers_link.publisher
@@ -143,9 +145,11 @@ class SqliteLibraryGateway:
 
         books = []
         found_ids: set[str] = set()
+        library_root = self._db_path.parent
         for row in rows:
             book_id = str(row[0])
             found_ids.add(book_id)
+            cover_path = self._compute_cover_path(library_root, row[10], row[11])
             books.append(
                 BookDetails(
                     id=book_id,
@@ -166,11 +170,20 @@ class SqliteLibraryGateway:
                         if row[8] is not None
                         else None
                     ),
+                    cover_path=cover_path,
                 )
             )
 
         missing_ids = tuple(id_ for id_ in deduped_ids if id_ not in found_ids)
         return BookDetailsResult(books=tuple(books), missing_ids=missing_ids)
+
+    @staticmethod
+    def _compute_cover_path(
+        library_root: Path, book_path: str | None, has_cover: int | None
+    ) -> str | None:
+        if not has_cover or not book_path:
+            return None
+        return str(library_root / book_path.rstrip("/") / "cover.jpg")
 
     @staticmethod
     def _partition_ids(raw_ids: list[str]) -> tuple[list[str], list[str]]:

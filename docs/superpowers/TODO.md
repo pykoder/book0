@@ -71,3 +71,12 @@ concrete; the commit or plan that resolves an item removes its line.
   savings (skipping SQL joins per requested scope) requires forking `BookDetailsResult`'s
   shape or the `LibraryGateway` Protocol itself. No design exists yet; revisit via
   brainstorming when picked up.
+
+- [ ] **(undesigned) Remote cover download and local cache.** `book0-remote` runs on a different
+  machine from the server, so the absolute `cover_path` returned by `book0_api` is useless to
+  the client. A future design should: (a) add a server endpoint to serve the cover file bytes
+  (e.g. `GET /libraries/books/{id}/cover`), (b) have `book0_api` include a stable cache-key in
+  the response (not the server-side filesystem path), (c) have `book0-remote` download covers
+  to a local cache directory on first request, (d) return an anticipated local cache path so
+  the caller can check whether a cover has arrived without re-querying. No design exists yet;
+  revisit via brainstorming when picked up.

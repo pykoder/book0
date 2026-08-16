@@ -14,6 +14,7 @@ _BOOK_DETAILS_HEADERS = (
     "Series Index",
     "Tags",
     "Pub Date",
+    "Cover Path",
 )
 _COLUMN_GAP = "  "
 _LIST_SEPARATOR = " & "
@@ -87,6 +88,7 @@ def render_book_details_table(books: list[BookDetails]) -> str:
             _or_empty(book.series.index if book.series is not None else None),
             _LIST_SEPARATOR.join(book.tags),
             _format_pubdate(book.pubdate),
+            _or_empty(book.cover_path),
         )
         for book in books
     ]

@@ -10,8 +10,6 @@ from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
-    DUNE_DETAILS,
-    GOOD_OMENS_DETAILS,
     HOBBIT_DETAILS,
 )
 
@@ -227,12 +225,14 @@ def test_sqlite_gateway_satisfies_the_library_gateway_protocol(
 
 def test_get_book_details_returns_details_for_a_book_with_everything(
     calibre_metadata_db: Path,
+    expected_book_details: tuple,
 ):
+    dune_details, _, _ = expected_book_details
     gateway = SqliteLibraryGateway(calibre_metadata_db)
 
     result = gateway.get_book_details(["1"])
 
-    assert result.books == (DUNE_DETAILS,)
+    assert result.books == (dune_details,)
     assert result.missing_ids == ()
 
 
@@ -249,32 +249,40 @@ def test_get_book_details_returns_details_for_a_book_with_nothing_linked(
 
 def test_get_book_details_returns_details_for_a_book_with_only_some_fields(
     calibre_metadata_db: Path,
+    expected_book_details: tuple,
 ):
+    _, _, good_omens_details = expected_book_details
     gateway = SqliteLibraryGateway(calibre_metadata_db)
 
     result = gateway.get_book_details(["3"])
 
-    assert result.books == (GOOD_OMENS_DETAILS,)
+    assert result.books == (good_omens_details,)
     assert result.missing_ids == ()
 
 
 def test_get_book_details_returns_all_requested_books_regardless_of_order(
     calibre_metadata_db: Path,
+    expected_book_details: tuple,
 ):
+    dune_details, hobbit_details, good_omens_details = expected_book_details
     gateway = SqliteLibraryGateway(calibre_metadata_db)
 
     result = gateway.get_book_details(["3", "1", "2"])
 
-    assert set(result.books) == {DUNE_DETAILS, HOBBIT_DETAILS, GOOD_OMENS_DETAILS}
+    assert set(result.books) == {dune_details, hobbit_details, good_omens_details}
     assert result.missing_ids == ()
 
 
-def test_get_book_details_reports_unknown_ids_as_missing(calibre_metadata_db: Path):
+def test_get_book_details_reports_unknown_ids_as_missing(
+    calibre_metadata_db: Path,
+    expected_book_details: tuple,
+):
+    dune_details, _, _ = expected_book_details
     gateway = SqliteLibraryGateway(calibre_metadata_db)
 
     result = gateway.get_book_details(["1", "999", "abc"])
 
-    assert result.books == (DUNE_DETAILS,)
+    assert result.books == (dune_details,)
     assert set(result.missing_ids) == {"999", "abc"}
 
 
@@ -291,12 +299,14 @@ def test_get_book_details_treats_numeric_affinity_aliases_as_distinct_missing_id
 
 def test_get_book_details_handles_duplicates_invalid_and_unknown_ids_together(
     calibre_metadata_db: Path,
+    expected_book_details: tuple,
 ):
+    dune_details, _, _ = expected_book_details
     gateway = SqliteLibraryGateway(calibre_metadata_db)
 
     result = gateway.get_book_details(["1", "01", "999", "1"])
 
-    assert result.books == (DUNE_DETAILS,)
+    assert result.books == (dune_details,)
     assert result.missing_ids == ("01", "999")
 
 
@@ -311,12 +321,16 @@ def test_get_book_details_returns_all_ids_as_missing_when_none_are_valid(
     assert result.missing_ids == ("abc", "def")
 
 
-def test_get_book_details_silently_drops_empty_id_segments(calibre_metadata_db: Path):
+def test_get_book_details_silently_drops_empty_id_segments(
+    calibre_metadata_db: Path,
+    expected_book_details: tuple,
+):
+    dune_details, hobbit_details, _ = expected_book_details
     gateway = SqliteLibraryGateway(calibre_metadata_db)
 
     result = gateway.get_book_details(["1", "", "2"])
 
-    assert set(result.books) == {DUNE_DETAILS, HOBBIT_DETAILS}
+    assert set(result.books) == {dune_details, hobbit_details}
     assert result.missing_ids == ()
 
 

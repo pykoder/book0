@@ -15,8 +15,6 @@ from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
-    DUNE_DETAILS,
-    GOOD_OMENS_DETAILS,
 )
 
 
@@ -156,8 +154,11 @@ def test_run_help_mentions_the_publishers_subcommand(
 
 
 def test_run_prints_book_details_in_the_requested_id_order(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+    calibre_metadata_db: Path,
+    capsys: pytest.CaptureFixture[str],
+    expected_book_details: tuple,
 ):
+    dune_details, _, good_omens_details = expected_book_details
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -176,13 +177,16 @@ def test_run_prints_book_details_in_the_requested_id_order(
     assert exit_code == 0
     assert (
         capsys.readouterr().out
-        == render_book_details_table([GOOD_OMENS_DETAILS, DUNE_DETAILS]) + "\n"
+        == render_book_details_table([good_omens_details, dune_details]) + "\n"
     )
 
 
 def test_run_reports_missing_ids_for_book_details(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+    calibre_metadata_db: Path,
+    capsys: pytest.CaptureFixture[str],
+    expected_book_details: tuple,
 ):
+    dune_details, _, _ = expected_book_details
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -201,13 +205,16 @@ def test_run_reports_missing_ids_for_book_details(
     assert exit_code == 0
     captured = capsys.readouterr().out
     assert (
-        captured == render_book_details_table([DUNE_DETAILS]) + "\nMissing ids: 999\n"
+        captured == render_book_details_table([dune_details]) + "\nMissing ids: 999\n"
     )
 
 
 def test_run_dedupes_and_strips_whitespace_from_requested_book_detail_ids(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+    calibre_metadata_db: Path,
+    capsys: pytest.CaptureFixture[str],
+    expected_book_details: tuple,
 ):
+    dune_details, _, _ = expected_book_details
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -226,7 +233,7 @@ def test_run_dedupes_and_strips_whitespace_from_requested_book_detail_ids(
     assert exit_code == 0
     captured = capsys.readouterr().out
     assert (
-        captured == render_book_details_table([DUNE_DETAILS]) + "\nMissing ids: 999\n"
+        captured == render_book_details_table([dune_details]) + "\nMissing ids: 999\n"
     )
 
 

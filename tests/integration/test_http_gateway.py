@@ -17,9 +17,6 @@ from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
-    DUNE_DETAILS,
-    GOOD_OMENS_DETAILS,
-    HOBBIT_DETAILS,
 )
 
 
@@ -176,37 +173,43 @@ def test_list_books_raises_tag_required_error_when_no_default_configured(
 
 def test_get_book_details_uses_server_side_default_tag_when_tag_is_omitted(
     calibre_metadata_db: Path,
+    expected_book_details: tuple,
 ):
+    dune_details, _, _ = expected_book_details
     client = _client_for({"fiction": calibre_metadata_db}, default_tag="fiction")
     gateway = HttpLibraryGateway(client, None)
 
     result = gateway.get_book_details(["1"])
 
-    assert result.books == (DUNE_DETAILS,)
+    assert result.books == (dune_details,)
     assert result.missing_ids == ()
 
 
 def test_get_book_details_returns_expected_details_for_a_known_tag(
     calibre_metadata_db: Path,
+    expected_book_details: tuple,
 ):
+    dune_details, hobbit_details, good_omens_details = expected_book_details
     client = _client_for({"fiction": calibre_metadata_db})
     gateway = HttpLibraryGateway(client, "fiction")
 
     result = gateway.get_book_details(["3", "1", "2"])
 
-    assert set(result.books) == {DUNE_DETAILS, HOBBIT_DETAILS, GOOD_OMENS_DETAILS}
+    assert set(result.books) == {dune_details, hobbit_details, good_omens_details}
     assert result.missing_ids == ()
 
 
 def test_get_book_details_reports_missing_ids_for_a_known_tag(
     calibre_metadata_db: Path,
+    expected_book_details: tuple,
 ):
+    dune_details, _, _ = expected_book_details
     client = _client_for({"fiction": calibre_metadata_db})
     gateway = HttpLibraryGateway(client, "fiction")
 
     result = gateway.get_book_details(["1", "999"])
 
-    assert result.books == (DUNE_DETAILS,)
+    assert result.books == (dune_details,)
     assert result.missing_ids == ("999",)
 
 
