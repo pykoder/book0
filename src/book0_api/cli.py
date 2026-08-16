@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import tomllib
 import urllib.parse
 
 import uvicorn
@@ -23,6 +24,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "URL to listen on: http://host:port or unix:///path/to/socket "
             f"(default: {_DEFAULT_LISTEN})"
+        ),
+    )
+    parser.add_argument(
+        "--server-config",
+        default=None,
+        help=(
+            "path to a .book0-server.toml file providing --listen when it is "
+            "omitted (never auto-discovered)"
         ),
     )
     return parser
@@ -49,7 +58,19 @@ def run(argv: list[str] | None = None) -> None:
 
     os.environ[CONFIG_ENV_VAR] = args.config
 
-    listen = args.listen if args.listen is not None else _DEFAULT_LISTEN
+    listen = args.listen
+    if listen is None and args.server_config is not None:
+        try:
+            with open(args.server_config, "rb") as config_file:
+                listen = tomllib.load(config_file)["listen"]
+        except FileNotFoundError as error:
+            parser.error(str(error))
+        except (tomllib.TOMLDecodeError, KeyError) as error:
+            parser.error(
+                f"Invalid book0-server config file {args.server_config}: {error}"
+            )
+    if listen is None:
+        listen = _DEFAULT_LISTEN
 
     uvicorn.run(
         "book0_api.asgi:app",

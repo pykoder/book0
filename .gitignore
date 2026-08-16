@@ -3,5 +3,6 @@ __pycache__/
 .coverage
 .book0.toml
 .book0-client.toml
+.book0-server.toml
 .DS_Store
 .claude/settings.local.json

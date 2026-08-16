@@ -128,3 +128,100 @@ def test_run_exits_with_status_2_for_an_unsupported_listen_scheme(
 
     assert exc_info.value.code == 2
     assert "Unsupported --listen scheme" in capsys.readouterr().err
+
+
+def test_run_uses_listen_value_from_server_config_when_listen_flag_is_omitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config_path = tmp_path / "book0-libraries.toml"
+    server_config_path = tmp_path / ".book0-server.toml"
+    server_config_path.write_text('listen = "http://0.0.0.0:9000"\n')
+    calls = []
+    monkeypatch.setattr(
+        "book0_api.cli.uvicorn.run",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    run(
+        [
+            "--config",
+            str(config_path),
+            "--server-config",
+            str(server_config_path),
+        ]
+    )
+
+    assert calls == [
+        (("book0_api.asgi:app",), {"host": "0.0.0.0", "port": 9000, "reload": False})
+    ]
+
+
+def test_run_prefers_listen_flag_over_server_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config_path = tmp_path / "book0-libraries.toml"
+    server_config_path = tmp_path / ".book0-server.toml"
+    server_config_path.write_text("not valid toml === \n")
+    calls = []
+    monkeypatch.setattr(
+        "book0_api.cli.uvicorn.run",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    run(
+        [
+            "--config",
+            str(config_path),
+            "--listen",
+            "http://0.0.0.0:9000",
+            "--server-config",
+            str(server_config_path),
+        ]
+    )
+
+    assert calls == [
+        (("book0_api.asgi:app",), {"host": "0.0.0.0", "port": 9000, "reload": False})
+    ]
+
+
+def test_run_exits_with_status_2_when_server_config_path_does_not_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config_path = tmp_path / "book0-libraries.toml"
+    monkeypatch.setattr("book0_api.cli.uvicorn.run", lambda *args, **kwargs: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run(
+            [
+                "--config",
+                str(config_path),
+                "--server-config",
+                str(tmp_path / "does-not-exist.toml"),
+            ]
+        )
+
+    assert exc_info.value.code == 2
+
+
+def test_run_exits_with_status_2_when_server_config_is_invalid_toml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    config_path = tmp_path / "book0-libraries.toml"
+    server_config_path = tmp_path / ".book0-server.toml"
+    server_config_path.write_text("not valid toml === \n")
+    monkeypatch.setattr("book0_api.cli.uvicorn.run", lambda *args, **kwargs: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run(
+            [
+                "--config",
+                str(config_path),
+                "--server-config",
+                str(server_config_path),
+            ]
+        )
+
+    assert exc_info.value.code == 2
+    assert "Invalid book0-server config file" in capsys.readouterr().err
