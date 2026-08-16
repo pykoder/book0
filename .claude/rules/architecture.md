@@ -58,9 +58,11 @@ src/
 │   ├── asgi.py                    # `app` wired from CONFIG_ENV_VAR (BOOK0_API_CONFIG) - the
 │   │                                # real uvicorn import target ("book0_api.asgi:app")
 │   ├── cli.py                     # `book0-api` entry point: --config PATH (required), --reload,
-│   │                                # --host/--port (default 127.0.0.1:8000) OR --uds PATH (a
-│   │                                # Unix domain socket, e.g. for nginx via proxy_pass to
-│   │                                # unix:PATH) - mutually exclusive with --host/--port -> sets
+│   │                                # --listen URL (default http://127.0.0.1:8000): http://host:port
+│   │                                # or unix:///path/to/socket (e.g. for nginx via proxy_pass to
+│   │                                # unix:PATH), --server-config PATH (optional, never
+│   │                                # auto-discovered - supplies --listen from a .book0-server.toml
+│   │                                # file only when --listen itself is omitted) -> sets
 │   │                                # BOOK0_API_CONFIG, then uvicorn.run(...)
 │   └── schemas.py                 # BookOut: id, title, authors: list[str], pubdate;
 │                                    # AuthorOut/PublisherOut/SeriesOut: id, name;
@@ -68,12 +70,18 @@ src/
 │                                    # pubdate, authors, tags, publisher, series;
 │                                    # BookDetailsResultOut: books, missing_ids; BookIdsIn: ids
 └── book0_cli_remote/
+    ├── config.py                   # xdg_config_path(), find_config_file() (same shape as
+    │                                # book0_cli/config.py's, different filename/subpath:
+    │                                # .book0-client.toml / book0/client.toml), plus
+    │                                # load_server(config_path: Path) -> str
     ├── main.py                    # `book0-remote` entry point: `books`/`authors`/`publishers`/
     │                                `books-detail` subcommands (books is the default),
-    │                                --server URL (required), --tag TAG (optional - an omitted
-    │                                tag is sent to the server as no `tag` query parameter, and
-    │                                book0_api resolves its own server-side default_tag), --ids
-    │                                (books-detail only, required) -> HttpLibraryGateway
+    │                                --server URL (optional, falls back to a .book0-client.toml
+    │                                file - see config.py above - when omitted), --tag TAG
+    │                                (optional - an omitted tag is sent to the server as no `tag`
+    │                                query parameter, and book0_api resolves its own server-side
+    │                                default_tag), --ids (books-detail only, required) ->
+    │                                HttpLibraryGateway
     └── http_gateway.py             # HttpLibraryGateway: implements LibraryGateway over HTTP
 tests/
 ├── unit/                          # book0_presentation, book0_core models/errors, book0_config's
@@ -112,8 +120,9 @@ CLIs' tests all build on it rather than each defining their own fixture DB.
   depends on the other. Each has its own full `main.py`; the only thing that differs between
   them, behaviorally, is which `LibraryGateway` implementation gets constructed and which
   flags feed it: `--tag TAG` (optional, falling back to the config file's `default-library`)
-  for `book0`, vs. `--server URL` (required) and `--tag TAG` (optional, server resolves its
-  own `default-library`) for `book0-remote`. Neither CLI shares a run loop with the other -
+  for `book0`, vs. `--server URL` (optional, falling back to a `.book0-client.toml` file) and
+  `--tag TAG` (optional, server resolves its own `default-library`) for `book0-remote`.
+  Neither CLI shares a run loop with the other -
   there is no shared run-loop function between them. That was a deliberate choice, not an
   oversight, so do not "DRY them up" into one without a task that asks for it.
 - Code that talks to `metadata.db` (SQL, `sqlite3.connect`, schema assumptions, the

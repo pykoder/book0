@@ -42,8 +42,9 @@ No task is done without tests. This is not optional.
   today) - unknown tag, `LibraryNotFoundError`, `NotACalibreLibraryError`,
   `TagRequiredError` - and
   `book0_api/cli.py::run`'s argument branches (`--config` missing, `--reload` given vs.
-  omitted, `--host`/`--port` given vs. defaulted, `--uds` given alone vs. combined with
-  `--host`/`--port` - the latter must be rejected).
+  omitted, `--listen` given vs. defaulted, `--listen` with an unsupported scheme,
+  `--server-config` given vs. omitted, `--server-config` pointing at a missing/unreadable/
+  invalid file, `--listen` taking precedence over `--server-config` when both are given).
 
 ## Modified existing code
 

@@ -112,27 +112,37 @@ Add a library by adding a line to `book0-libraries.toml` (`tag = "${SOME_ENV_VAR
 setting that env var - no code change needed. A tag whose placeholder references an unset
 env var makes the server refuse to start (fail fast, not serve a broken library silently).
 
-By default the server listens on `127.0.0.1:8000` - loopback only, unreachable from other
-machines. `--host` names the *network interface* the process listens on, not a whitelist of
-client addresses: `127.0.0.1` binds to loopback only, `0.0.0.0` binds to every interface on
-the machine (reachable from any address that can route to the host), and a specific interface
-IP binds to just that one. It does not restrict *who* may connect on that interface - see
-"Restricting access" below for that.
+By default the server listens on `http://127.0.0.1:8000` - loopback only, unreachable from
+other machines. `--listen URL` names the *network interface* (or socket) the process listens
+on, not a whitelist of client addresses: with an `http://` URL, `127.0.0.1` binds to loopback
+only, `0.0.0.0` binds to every interface on the machine (reachable from any address that can
+route to the host), and a specific interface IP binds to just that one. It does not restrict
+*who* may connect on that interface - see "Restricting access" below for that. A `unix://` URL
+instead has `book0_api` listen on a Unix domain socket - see the section right below for that.
 
 ```sh
-uv run book0-api --config book0-libraries.toml --host 0.0.0.0 --port 9000
+uv run book0-api --config book0-libraries.toml --listen http://0.0.0.0:9000
 ```
 
 `--reload` enables uvicorn's auto-reload, for development only.
 
-#### Running behind nginx (Unix domain socket)
-
-For a production deployment behind nginx, use `--uds` to have `book0_api` listen on a Unix
-domain socket instead of a TCP host/port (`--uds` and `--host`/`--port` are mutually
-exclusive - pick one):
+`--server-config PATH` supplies `--listen` when the flag itself is omitted, from a
+`.book0-server.toml` file with a single `listen = "http://host:port"` (or
+`listen = "unix:///path"`) key. Unlike `book0-remote`'s client-side config file (see below),
+`--server-config` is never auto-discovered - the server is started far less often than either
+CLI is invoked, so it always has to be passed explicitly:
 
 ```sh
-uv run book0-api --config book0-libraries.toml --uds /run/book0-api.sock
+uv run book0-api --config book0-libraries.toml --server-config .book0-server.toml
+```
+
+#### Running behind nginx (Unix domain socket)
+
+For a production deployment behind nginx, use a `unix://` `--listen` URL to have `book0_api`
+listen on a Unix domain socket instead of a TCP host/port:
+
+```sh
+uv run book0-api --config book0-libraries.toml --listen unix:///run/book0-api.sock
 ```
 
 Point nginx at that socket:
@@ -158,9 +168,9 @@ already in use".
 
 `book0_api` has no authentication/authorization of its own (by design - see
 `docs/superpowers/specs/2026-08-04-book0-api-and-remote-cli-design.md`'s "out of scope"
-section), and `--host`/`--port`/`--uds` only control which interface or socket it listens on,
-not which clients may connect to it. To allow only specific addresses or a subnet, use the
-layer in front of `book0_api` instead:
+section), and `--listen` only controls which interface or socket it listens on, not which
+clients may connect to it. To allow only specific addresses or a subnet, use the layer in
+front of `book0_api` instead:
 
 - Behind nginx, `allow`/`deny` in the `location`/`server` block:
 
@@ -174,10 +184,19 @@ layer in front of `book0_api` instead:
   }
   ```
 
-- Without nginx (e.g. `--host 0.0.0.0` directly), restrict the port at the OS firewall
-  (`ufw`, `iptables`, `pf`) to the same specific addresses/subnet instead.
+- Without nginx (e.g. `--listen http://0.0.0.0:<port>` directly), restrict the port at the OS
+  firewall (`ufw`, `iptables`, `pf`) to the same specific addresses/subnet instead.
 
 ### 2. Run the CLI against it
+
+`--server` may be omitted - `book0-remote` then falls back to a `.book0-client.toml` file
+(checked in the current directory, then `~/.config/book0/client.toml` /
+`$XDG_CONFIG_HOME/book0/client.toml`), mirroring how `.book0.toml` (above) supplies
+`default-library`:
+
+```toml
+server = "http://127.0.0.1:8000"
+```
 
 ```sh
 uv run book0-remote books --server http://127.0.0.1:8000 --tag fiction

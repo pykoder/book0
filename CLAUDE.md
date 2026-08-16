@@ -14,11 +14,11 @@
 - **Domain**: two parallel ways to list the books in a Calibre library, both producing
   identical output. `book0 [--tag <tag>]` reads the library's `metadata.db` SQLite file
   directly (read-only), falling back to the `default-library` tag in its own config file when
-  `--tag` is omitted. `book0-remote --server <url> [--tag <tag>]` talks over HTTP to
+  `--tag` is omitted. `book0-remote [--server <url>] [--tag <tag>]` talks over HTTP to
   `book0_api`, a FastAPI service that reads `metadata.db` on the server's behalf for one of
-  several tag-named libraries configured server-side, falling back to the server's own
-  configured `default-library` when `--tag` is omitted. Single consumer for both: a person
-  running either CLI in a terminal.
+  several tag-named libraries configured server-side, falling back to a `.book0-client.toml`
+  file when `--server` is omitted and to the server's own configured `default-library` when
+  `--tag` is omitted. Single consumer for both: a person running either CLI in a terminal.
 - **Architecture**: `book0_core` (domain: `Book`, the `LibraryGateway` `Protocol`, its SQLite
   implementation, domain errors) has two consumers of the gateway abstraction -
   `book0_cli` (direct, wires `SqliteLibraryGateway`) and `book0_cli_remote` (wires
@@ -61,7 +61,7 @@ step.
 | Remove a dependency | `uv remove <package>` |
 | Run the direct CLI | `uv run book0 [--tag <tag>]` |
 | Run the API server | `<ENV VARS FOR EACH LIBRARY> uv run book0-api --config book0-libraries.toml --reload` |
-| Run the remote CLI | `uv run book0-remote --server <url> [--tag <tag>]` |
+| Run the remote CLI | `uv run book0-remote [--server <url>] [--tag <tag>]` (falls back to `.book0-client.toml`) |
 | Run the test suite | `uv run pytest` |
 | Run a test subset | `uv run pytest tests/unit -v` |
 | Lint | `uv run ruff check .` |

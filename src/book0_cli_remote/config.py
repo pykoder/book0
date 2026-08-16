@@ -1,3 +1,10 @@
+"""Client-side config discovery/loading for `book0-remote`'s `--server` fallback.
+
+Reads `.book0-client.toml`, a personal/local file (gitignored, not committed) holding a
+single `server = "http://host:port"` key today - the schema may grow beyond that one key
+later, but no other key is designed yet.
+"""
+
 import os
 import tomllib
 from pathlib import Path
