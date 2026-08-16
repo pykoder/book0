@@ -130,6 +130,36 @@ def test_run_exits_with_status_2_for_an_unsupported_listen_scheme(
     assert "Unsupported --listen scheme" in capsys.readouterr().err
 
 
+def test_run_exits_with_status_2_for_an_invalid_listen_port(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    config_path = tmp_path / "book0-libraries.toml"
+    monkeypatch.setattr("book0_api.cli.uvicorn.run", lambda *args, **kwargs: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run(["--config", str(config_path), "--listen", "http://host:abc"])
+
+    assert exc_info.value.code == 2
+    assert "port" in capsys.readouterr().err.lower()
+
+
+def test_run_exits_with_status_2_for_an_empty_unix_listen_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    config_path = tmp_path / "book0-libraries.toml"
+    monkeypatch.setattr("book0_api.cli.uvicorn.run", lambda *args, **kwargs: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run(["--config", str(config_path), "--listen", "unix://"])
+
+    assert exc_info.value.code == 2
+    assert "--listen" in capsys.readouterr().err
+
+
 def test_run_uses_listen_value_from_server_config_when_listen_flag_is_omitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

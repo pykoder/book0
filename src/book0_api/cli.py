@@ -42,9 +42,15 @@ def _listen_kwargs(
 ) -> dict[str, str | int]:
     parsed = urllib.parse.urlsplit(listen)
     if parsed.scheme == "unix":
+        if not parsed.path:
+            parser.error(f"--listen unix URL is missing a socket path: {listen!r}")
         return {"uds": parsed.path}
     if parsed.scheme == "http":
-        return {"host": parsed.hostname or "127.0.0.1", "port": parsed.port or 8000}
+        try:
+            port = parsed.port
+        except ValueError as error:
+            parser.error(f"--listen has an invalid port: {error}")
+        return {"host": parsed.hostname or "127.0.0.1", "port": port or 8000}
     parser.error(
         f"Unsupported --listen scheme: {parsed.scheme!r} (expected http or unix)"
     )
@@ -63,8 +69,10 @@ def run(argv: list[str] | None = None) -> None:
         try:
             with open(args.server_config, "rb") as config_file:
                 listen = tomllib.load(config_file)["listen"]
-        except FileNotFoundError as error:
-            parser.error(str(error))
+        except OSError as error:
+            parser.error(
+                f"Could not read book0-server config file {args.server_config}: {error}"
+            )
         except (tomllib.TOMLDecodeError, KeyError) as error:
             parser.error(
                 f"Invalid book0-server config file {args.server_config}: {error}"
