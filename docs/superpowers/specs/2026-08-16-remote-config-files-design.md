@@ -60,8 +60,10 @@ shared code; it is the same deliberate non-sharing already established between t
 LOCAL_CONFIG_FILENAME = ".book0-client.toml"
 _XDG_CONFIG_SUBPATH = Path("book0") / "client.toml"
 
-def xdg_config_path() -> Path: ...   # identical body to book0_cli/config.py's
-def find_config_file() -> Path | None: ...   # identical body
+
+def xdg_config_path() -> Path: ...  # identical body to book0_cli/config.py's
+def find_config_file() -> Path | None: ...  # identical body
+
 
 def load_server(config_path: Path) -> str:
     with config_path.open("rb") as config_file:
@@ -146,7 +148,9 @@ elif parsed.scheme == "http":
         reload=args.reload,
     )
 else:
-    parser.error(f"Unsupported --listen scheme: {parsed.scheme!r} (expected http or unix)")
+    parser.error(
+        f"Unsupported --listen scheme: {parsed.scheme!r} (expected http or unix)"
+    )
 ```
 
 All failure modes use `parser.error(...)` (prints usage + message to stderr, exits 2) — this

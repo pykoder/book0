@@ -1002,9 +1002,7 @@ from book0_core.errors import (
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 
 
-def create_app(
-    libraries: dict[str, Path], default_tag: str | None = None
-) -> FastAPI:
+def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> FastAPI:
     app = FastAPI()
 
     def _resolve_db_path(tag: str | None) -> Path | None:
@@ -1392,7 +1390,9 @@ Add `TagRequiredError` to the existing `from book0_core.errors import (...)` imp
 def test_run_uses_server_side_default_tag_when_tag_is_omitted(
     calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
 ):
-    client = TestClient(create_app({"fiction": calibre_metadata_db}, default_tag="fiction"))
+    client = TestClient(
+        create_app({"fiction": calibre_metadata_db}, default_tag="fiction")
+    )
 
     exit_code = run(["--server", "unused"], client=client)
 
