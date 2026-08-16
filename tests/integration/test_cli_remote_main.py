@@ -298,3 +298,69 @@ def test_run_reports_tag_required_error_on_stderr_and_exits_with_status_1(
     assert "No tag given and no default-library configured for this server" in (
         captured.err
     )
+
+
+def test_run_resolves_server_from_book0_client_toml_when_server_flag_is_omitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    (tmp_path / ".book0-client.toml").write_text('server = "http://127.0.0.1:1"\n')
+
+    exit_code = run(["--tag", "fiction"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Could not reach the book0 server at http://127.0.0.1:1" in captured.err
+
+
+def test_run_prefers_explicit_server_flag_over_book0_client_toml(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    (tmp_path / ".book0-client.toml").write_text("not valid toml === \n")
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(["--server", "unused", "--tag", "fiction"], client=client)
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+
+
+def test_run_reports_error_when_server_flag_omitted_and_no_client_config_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    exit_code = run(["--tag", "fiction"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "No --server given and no book0-remote client config file found" in (
+        captured.err
+    )
+
+
+def test_run_reports_error_for_invalid_book0_client_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    (tmp_path / ".book0-client.toml").write_text("not valid toml === \n")
+
+    exit_code = run(["--tag", "fiction"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "Invalid book0-remote client config file" in captured.err
