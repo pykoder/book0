@@ -7,7 +7,9 @@ import httpx
 from book0_cli_remote.config import (
     LOCAL_CONFIG_FILENAME,
     find_config_file,
+    load_cover_cache_dir,
     load_server,
+    xdg_cache_path,
     xdg_config_path,
 )
 from book0_cli_remote.http_gateway import HttpLibraryGateway
@@ -53,6 +55,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     books_detail_parser.add_argument("--server", help=_SERVER_HELP)
     books_detail_parser.add_argument("--tag")
+    books_detail_parser.add_argument(
+        "--with-covers",
+        action="store_true",
+        help="download and cache covers for the requested books",
+    )
 
     return parser
 
@@ -93,7 +100,28 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
         client = httpx.Client(base_url=server)
 
     try:
-        gateway = HttpLibraryGateway(client, args.tag)
+        cache_dir = None
+        if args.command == "books-detail":
+            cache_config_path = find_config_file()
+            if cache_config_path is not None:
+                try:
+                    cache_dir = load_cover_cache_dir(cache_config_path)
+                except tomllib.TOMLDecodeError as error:
+                    print(
+                        f"Invalid book0-remote client config file "
+                        f"{cache_config_path}: {error}",
+                        file=sys.stderr,
+                    )
+                    return 1
+            if cache_dir is None:
+                cache_dir = xdg_cache_path()
+
+        gateway = HttpLibraryGateway(
+            client,
+            args.tag,
+            with_covers=getattr(args, "with_covers", False),
+            cache_dir=cache_dir,
+        )
         try:
             if args.command == "authors":
                 print(render_author_table(gateway.list_authors()))

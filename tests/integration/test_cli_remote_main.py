@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -157,8 +158,14 @@ def test_run_prints_book_details_in_the_requested_id_order(
     calibre_metadata_db: Path,
     capsys: pytest.CaptureFixture[str],
     expected_book_details: tuple,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     dune_details, _, good_omens_details = expected_book_details
+    dune_details = replace(dune_details, cover_path=False)
+    good_omens_details = replace(good_omens_details, cover_path=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -185,8 +192,13 @@ def test_run_reports_missing_ids_for_book_details(
     calibre_metadata_db: Path,
     capsys: pytest.CaptureFixture[str],
     expected_book_details: tuple,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     dune_details, _, _ = expected_book_details
+    dune_details = replace(dune_details, cover_path=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -213,8 +225,13 @@ def test_run_dedupes_and_strips_whitespace_from_requested_book_detail_ids(
     calibre_metadata_db: Path,
     capsys: pytest.CaptureFixture[str],
     expected_book_details: tuple,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     dune_details, _, _ = expected_book_details
+    dune_details = replace(dune_details, cover_path=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -238,8 +255,13 @@ def test_run_dedupes_and_strips_whitespace_from_requested_book_detail_ids(
 
 
 def test_run_reports_all_ids_missing_for_an_unconfigured_tag(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+    calibre_metadata_db: Path,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -370,4 +392,114 @@ def test_run_reports_error_for_invalid_book0_client_toml(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert captured.out == ""
+    assert "Invalid book0-remote client config file" in captured.err
+
+
+def test_run_shows_unavailable_cover_when_with_covers_flag_is_omitted(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        ["books-detail", "--ids", "1", "--server", "unused", "--tag", "fiction"],
+        client=client,
+    )
+
+    assert exit_code == 0
+    assert "(unavailable)" in capsys.readouterr().out
+
+
+def test_run_downloads_and_caches_cover_when_with_covers_flag_is_given(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    library_root = calibre_metadata_db.parent
+    server_cover = library_root / "Frank Herbert/Dune (1)/cover.jpg"
+    server_cover.parent.mkdir(parents=True, exist_ok=True)
+    server_cover.write_bytes(b"server-bytes")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        [
+            "books-detail",
+            "--ids",
+            "1",
+            "--with-covers",
+            "--server",
+            "unused",
+            "--tag",
+            "fiction",
+        ],
+        client=client,
+    )
+
+    assert exit_code == 0
+    cached_cover = (
+        tmp_path / "home" / ".cache" / "book0" / "covers" / "fiction" / "1.jpg"
+    )
+    assert cached_cover.read_bytes() == b"server-bytes"
+    assert str(cached_cover) in capsys.readouterr().out
+
+
+def test_run_uses_cover_cache_dir_from_client_config(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    library_root = calibre_metadata_db.parent
+    server_cover = library_root / "Frank Herbert/Dune (1)/cover.jpg"
+    server_cover.parent.mkdir(parents=True, exist_ok=True)
+    server_cover.write_bytes(b"server-bytes")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    custom_cache_dir = tmp_path / "custom-cache"
+    (tmp_path / ".book0-client.toml").write_text(
+        f'server = "http://unused"\ncover-cache-dir = "{custom_cache_dir}"\n'
+    )
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        [
+            "books-detail",
+            "--ids",
+            "1",
+            "--with-covers",
+            "--server",
+            "unused",
+            "--tag",
+            "fiction",
+        ],
+        client=client,
+    )
+
+    assert exit_code == 0
+    cached_cover = custom_cache_dir / "fiction" / "1.jpg"
+    assert cached_cover.read_bytes() == b"server-bytes"
+
+
+def test_run_reports_error_for_invalid_cover_cache_dir_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    (tmp_path / ".book0-client.toml").write_text("not valid toml === \n")
+
+    exit_code = run(
+        ["books-detail", "--ids", "1", "--server", "unused", "--tag", "fiction"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
     assert "Invalid book0-remote client config file" in captured.err
