@@ -3,7 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from book0_cli_remote.config import find_config_file, load_server, xdg_config_path
+from book0_cli_remote.config import (
+    find_config_file,
+    load_cover_cache_dir,
+    load_server,
+    xdg_cache_path,
+    xdg_config_path,
+)
 
 
 def test_xdg_config_path_uses_xdg_config_home_when_set(
@@ -98,3 +104,47 @@ def test_load_server_raises_toml_decode_error_for_invalid_toml(tmp_path: Path):
 
     with pytest.raises(tomllib.TOMLDecodeError):
         load_server(config_path)
+
+
+def test_xdg_cache_path_uses_xdg_cache_home_when_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    xdg_cache_home = tmp_path / "xdg-cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(xdg_cache_home))
+
+    assert xdg_cache_path() == xdg_cache_home / "book0" / "covers"
+
+
+def test_xdg_cache_path_falls_back_to_home_dot_cache_when_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    assert xdg_cache_path() == tmp_path / ".cache" / "book0" / "covers"
+
+
+def test_load_cover_cache_dir_returns_the_configured_path(tmp_path: Path):
+    config_path = tmp_path / ".book0-client.toml"
+    config_path.write_text(
+        'server = "http://127.0.0.1:8000"\ncover-cache-dir = "/tmp/covers"\n'
+    )
+
+    assert load_cover_cache_dir(config_path) == Path("/tmp/covers")
+
+
+def test_load_cover_cache_dir_returns_none_when_key_is_absent(tmp_path: Path):
+    config_path = tmp_path / ".book0-client.toml"
+    config_path.write_text('server = "http://127.0.0.1:8000"\n')
+
+    assert load_cover_cache_dir(config_path) is None
+
+
+def test_load_cover_cache_dir_raises_toml_decode_error_for_invalid_toml(
+    tmp_path: Path,
+):
+    config_path = tmp_path / ".book0-client.toml"
+    config_path.write_text("not valid toml === \n")
+
+    with pytest.raises(tomllib.TOMLDecodeError):
+        load_cover_cache_dir(config_path)
