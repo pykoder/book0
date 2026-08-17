@@ -163,6 +163,8 @@ def test_run_prints_book_details_in_the_requested_id_order(
 ):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     dune_details, _, good_omens_details = expected_book_details
     dune_details = replace(dune_details, cover_path=False)
     good_omens_details = replace(good_omens_details, cover_path=False)
@@ -197,6 +199,8 @@ def test_run_reports_missing_ids_for_book_details(
 ):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     dune_details, _, _ = expected_book_details
     dune_details = replace(dune_details, cover_path=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
@@ -230,6 +234,8 @@ def test_run_dedupes_and_strips_whitespace_from_requested_book_detail_ids(
 ):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     dune_details, _, _ = expected_book_details
     dune_details = replace(dune_details, cover_path=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
@@ -262,6 +268,8 @@ def test_run_reports_all_ids_missing_for_an_unconfigured_tag(
 ):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -335,6 +343,7 @@ def test_run_resolves_server_from_book0_client_toml_when_server_flag_is_omitted(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     (tmp_path / ".book0-client.toml").write_text('server = "http://127.0.0.1:1"\n')
 
     exit_code = run(["--tag", "fiction"])
@@ -353,6 +362,7 @@ def test_run_prefers_explicit_server_flag_over_book0_client_toml(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     (tmp_path / ".book0-client.toml").write_text("not valid toml === \n")
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
@@ -368,6 +378,7 @@ def test_run_reports_error_when_server_flag_omitted_and_no_client_config_found(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
 
     exit_code = run(["--tag", "fiction"])
 
@@ -385,6 +396,7 @@ def test_run_reports_error_for_invalid_book0_client_toml(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     (tmp_path / ".book0-client.toml").write_text("not valid toml === \n")
 
     exit_code = run(["--tag", "fiction"])
@@ -403,6 +415,8 @@ def test_run_shows_unavailable_cover_when_with_covers_flag_is_omitted(
 ):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -426,6 +440,8 @@ def test_run_downloads_and_caches_cover_when_with_covers_flag_is_given(
     server_cover.write_bytes(b"server-bytes")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -462,6 +478,8 @@ def test_run_uses_cover_cache_dir_from_client_config(
     server_cover.write_bytes(b"server-bytes")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     custom_cache_dir = tmp_path / "custom-cache"
     (tmp_path / ".book0-client.toml").write_text(
         f'server = "http://unused"\ncover-cache-dir = "{custom_cache_dir}"\n'
@@ -494,6 +512,8 @@ def test_run_reports_error_for_invalid_cover_cache_dir_config(
 ):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     (tmp_path / ".book0-client.toml").write_text("not valid toml === \n")
 
     exit_code = run(
