@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ class BookDetails:
     tags: tuple[str, ...]
     publisher: Publisher | None
     series: SeriesItem | None
-    cover_path: str | None = None
+    cover_path: str | None | Literal[False] = None
 
 
 @dataclass(frozen=True)

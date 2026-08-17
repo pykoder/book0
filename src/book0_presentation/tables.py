@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from book0_core.models import Author, Book, BookDetails, BookDetailsResult, Publisher
 
@@ -28,6 +29,12 @@ def _format_pubdate(pubdate: str | None) -> str:
 
 def _or_empty(value: str | None) -> str:
     return value if value is not None else ""
+
+
+def _cover_path_cell(cover_path: str | None | Literal[False]) -> str:
+    if cover_path is False:
+        return "(unavailable)"
+    return _or_empty(cover_path)
 
 
 def _align_rows(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
@@ -88,7 +95,7 @@ def render_book_details_table(books: list[BookDetails]) -> str:
             _or_empty(book.series.index if book.series is not None else None),
             _LIST_SEPARATOR.join(book.tags),
             _format_pubdate(book.pubdate),
-            _or_empty(book.cover_path),
+            _cover_path_cell(book.cover_path),
         )
         for book in books
     ]

@@ -166,6 +166,25 @@ def test_render_book_details_table_reports_empty_list():
     assert render_book_details_table([]) == "No book details found."
 
 
+def test_render_book_details_table_shows_unavailable_for_a_cover_that_is_not_local():
+    books = [
+        BookDetails(
+            id="1",
+            title="Dune",
+            pubdate=None,
+            authors=(),
+            tags=(),
+            publisher=None,
+            series=None,
+            cover_path=False,
+        ),
+    ]
+
+    output = render_book_details_table(books)
+
+    assert "(unavailable)" in output
+
+
 def test_order_book_details_by_ids_reorders_to_match_requested_order():
     dune = BookDetails(
         id="1",
