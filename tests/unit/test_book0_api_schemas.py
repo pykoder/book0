@@ -102,7 +102,7 @@ def test_from_book_details_converts_book_details_with_everything_populated():
         series=SeriesItemOut(
             series=SeriesOut(id="1", name="Dune Chronicles"), index="1.0"
         ),
-        cover_path="/library/Frank Herbert/Dune (1)/cover.jpg",
+        has_cover=True,
     )
 
 
@@ -122,6 +122,7 @@ def test_from_book_details_converts_book_details_with_no_publisher_or_series():
     assert book_details_out.publisher is None
     assert book_details_out.series is None
     assert book_details_out.tags == []
+    assert book_details_out.has_cover is False
 
 
 def test_from_book_details_result_converts_books_and_missing_ids():

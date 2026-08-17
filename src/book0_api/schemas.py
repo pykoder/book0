@@ -74,7 +74,7 @@ class BookDetailsOut(BaseModel):
     tags: list[str]
     publisher: PublisherOut | None
     series: SeriesItemOut | None
-    cover_path: str | None
+    has_cover: bool
 
     @classmethod
     def from_book_details(cls, book_details: BookDetails) -> "BookDetailsOut":
@@ -94,7 +94,7 @@ class BookDetailsOut(BaseModel):
                 if book_details.series is not None
                 else None
             ),
-            cover_path=book_details.cover_path,
+            has_cover=book_details.cover_path is not None,
         )
 
 

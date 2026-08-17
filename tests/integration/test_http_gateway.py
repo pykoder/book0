@@ -1,4 +1,5 @@
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -13,6 +14,7 @@ from book0_core.errors import (
     TagRequiredError,
 )
 from book0_core.gateway import LibraryGateway
+from book0_core.models import BookDetails
 from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
@@ -24,6 +26,15 @@ def _client_for(
     libraries: dict[str, Path], default_tag: str | None = None
 ) -> httpx.Client:
     return TestClient(create_app(libraries, default_tag))
+
+
+def _without_local_cover(details: BookDetails) -> BookDetails:
+    """A gateway constructed with no cache_dir can never report a real local
+    path - has_cover=True books resolve to False (unavailable), not the
+    server's real path."""
+    if details.cover_path is None:
+        return details
+    return replace(details, cover_path=False)
 
 
 def test_list_books_returns_expected_books_for_a_known_tag(calibre_metadata_db: Path):
@@ -181,7 +192,7 @@ def test_get_book_details_uses_server_side_default_tag_when_tag_is_omitted(
 
     result = gateway.get_book_details(["1"])
 
-    assert result.books == (dune_details,)
+    assert result.books == (_without_local_cover(dune_details),)
     assert result.missing_ids == ()
 
 
@@ -195,7 +206,11 @@ def test_get_book_details_returns_expected_details_for_a_known_tag(
 
     result = gateway.get_book_details(["3", "1", "2"])
 
-    assert set(result.books) == {dune_details, hobbit_details, good_omens_details}
+    assert set(result.books) == {
+        _without_local_cover(dune_details),
+        hobbit_details,
+        _without_local_cover(good_omens_details),
+    }
     assert result.missing_ids == ()
 
 
@@ -209,7 +224,7 @@ def test_get_book_details_reports_missing_ids_for_a_known_tag(
 
     result = gateway.get_book_details(["1", "999"])
 
-    assert result.books == (dune_details,)
+    assert result.books == (_without_local_cover(dune_details),)
     assert result.missing_ids == ("999",)
 
 
@@ -246,3 +261,65 @@ def test_get_book_details_raises_not_a_calibre_library_error(tmp_path: Path):
 
     with pytest.raises(NotACalibreLibraryError):
         gateway.get_book_details(["1"])
+
+
+def test_get_book_details_uses_cached_cover_without_making_an_http_request(
+    calibre_metadata_db: Path, tmp_path: Path
+):
+    cache_dir = tmp_path / "cache"
+    cached_cover = cache_dir / "fiction" / "1.jpg"
+    cached_cover.parent.mkdir(parents=True)
+    cached_cover.write_bytes(b"cached-bytes")
+    client = _client_for({"fiction": calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, "fiction", cache_dir=cache_dir)
+
+    result = gateway.get_book_details(["1"])
+
+    assert result.books[0].cover_path == str(cached_cover)
+
+
+def test_get_book_details_reports_false_cover_path_when_not_cached_and_with_covers_is_off(
+    calibre_metadata_db: Path, tmp_path: Path
+):
+    client = _client_for({"fiction": calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, "fiction", cache_dir=tmp_path / "cache")
+
+    result = gateway.get_book_details(["1"])
+
+    assert result.books[0].cover_path is False
+
+
+def test_get_book_details_downloads_and_caches_the_cover_when_with_covers_is_set(
+    calibre_metadata_db: Path, tmp_path: Path
+):
+    library_root = calibre_metadata_db.parent
+    server_cover = library_root / "Frank Herbert/Dune (1)/cover.jpg"
+    server_cover.parent.mkdir(parents=True, exist_ok=True)
+    server_cover.write_bytes(b"server-bytes")
+    cache_dir = tmp_path / "cache"
+    client = _client_for({"fiction": calibre_metadata_db})
+    gateway = HttpLibraryGateway(
+        client, "fiction", with_covers=True, cache_dir=cache_dir
+    )
+
+    result = gateway.get_book_details(["1"])
+
+    expected_path = cache_dir / "fiction" / "1.jpg"
+    assert result.books[0].cover_path == str(expected_path)
+    assert expected_path.read_bytes() == b"server-bytes"
+
+
+def test_get_book_details_reports_false_cover_path_when_the_fetch_fails(
+    calibre_metadata_db: Path, tmp_path: Path
+):
+    # Dune (id 1) has has_cover=1 in the fixture DB but no real cover.jpg
+    # file on disk, so the server's own cover route 404s - the fetch must
+    # fail without raising.
+    client = _client_for({"fiction": calibre_metadata_db})
+    gateway = HttpLibraryGateway(
+        client, "fiction", with_covers=True, cache_dir=tmp_path / "cache"
+    )
+
+    result = gateway.get_book_details(["1"])
+
+    assert result.books[0].cover_path is False

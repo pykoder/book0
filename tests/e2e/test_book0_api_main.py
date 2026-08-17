@@ -270,7 +270,6 @@ def test_get_book_details_returns_expected_details_for_a_known_tag(
 ):
     app = create_app({"fiction": calibre_metadata_db})
     client = TestClient(app)
-    library_root = calibre_metadata_db.parent
 
     response = client.post(
         "/libraries/books/detail", params={"tag": "fiction"}, json={"ids": ["1"]}
@@ -291,9 +290,7 @@ def test_get_book_details_returns_expected_details_for_a_known_tag(
             "series": {"id": "1", "name": "Dune Chronicles"},
             "index": "1.0",
         },
-        "cover_path": str(
-            library_root / "Frank Herbert/Dune (1)/cover.jpg"
-        ),
+        "has_cover": True,
     }
 
 
