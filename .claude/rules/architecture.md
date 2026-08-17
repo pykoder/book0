@@ -67,21 +67,23 @@ src/
 │   └── schemas.py                 # BookOut: id, title, authors: list[str], pubdate;
 │                                    # AuthorOut/PublisherOut/SeriesOut: id, name;
 │                                    # SeriesItemOut: series, index; BookDetailsOut: id, title,
-│                                    # pubdate, authors, tags, publisher, series;
+│                                    # pubdate, authors, tags, publisher, series, has_cover;
 │                                    # BookDetailsResultOut: books, missing_ids; BookIdsIn: ids
 └── book0_cli_remote/
     ├── config.py                   # xdg_config_path(), find_config_file() (same shape as
     │                                # book0_cli/config.py's, different filename/subpath:
     │                                # .book0-client.toml / book0/client.toml), plus
-    │                                # load_server(config_path: Path) -> str
+    │                                # load_server(config_path: Path) -> str, xdg_cache_path(),
+    │                                # load_cover_cache_dir(config_path: Path) -> Path | None
     ├── main.py                    # `book0-remote` entry point: `books`/`authors`/`publishers`/
     │                                `books-detail` subcommands (books is the default),
     │                                --server URL (optional, falls back to a .book0-client.toml
     │                                file - see config.py above - when omitted), --tag TAG
     │                                (optional - an omitted tag is sent to the server as no `tag`
     │                                query parameter, and book0_api resolves its own server-side
-    │                                default_tag), --ids (books-detail only, required) ->
-    │                                HttpLibraryGateway
+    │                                default_tag), --ids (books-detail only, required),
+    │                                --with-covers (books-detail only, downloads and caches
+    │                                covers) -> HttpLibraryGateway
     └── http_gateway.py             # HttpLibraryGateway: implements LibraryGateway over HTTP
 tests/
 ├── unit/                          # book0_presentation, book0_core models/errors, book0_config's

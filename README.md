@@ -53,8 +53,8 @@ ID  Name
 ```
 
 ```
-ID  Title  Authors        Publisher  Series           Series Index  Tags              Pub Date
-1   Dune   Frank Herbert  Ace Books  Dune Chronicles  1.0           sci-fi & classic  1965-08-01
+ID  Title  Authors        Publisher  Series           Series Index  Tags              Pub Date    Cover Path
+1   Dune   Frank Herbert  Ace Books  Dune Chronicles  1.0           sci-fi & classic  1965-08-01  /path/to/fiction/Frank Herbert/Dune (1)/cover.jpg
 ```
 
 `books-detail` never errors on an unknown id - it prints a `Missing ids: ...` line after the
@@ -196,7 +196,12 @@ front of `book0_api` instead:
 
 ```toml
 server = "http://127.0.0.1:8000"
+cover-cache-dir = "/path/to/local/cover/cache"
 ```
+
+`cover-cache-dir` is optional - it names the local directory `books-detail --with-covers`
+downloads and caches cover images into (see below). Leave it out and `book0-remote` falls back
+to an XDG cache directory: `~/.cache/book0/covers` / `$XDG_CACHE_HOME/book0/covers`.
 
 ```sh
 uv run book0-remote books --server http://127.0.0.1:8000 --tag fiction
@@ -204,6 +209,7 @@ uv run book0-remote books --server http://127.0.0.1:8000 --tag fiction
 uv run book0-remote authors --server http://127.0.0.1:8000 --tag fiction
 uv run book0-remote publishers --server http://127.0.0.1:8000 --tag fiction
 uv run book0-remote books-detail --ids 1,2,3 --server http://127.0.0.1:8000 --tag fiction
+uv run book0-remote books-detail --ids 1,2,3 --with-covers --server http://127.0.0.1:8000 --tag fiction
 # or, with no --tag - relies on the *server's* configured default-library, not any
 # client-side setting:
 uv run book0-remote --server http://127.0.0.1:8000
@@ -215,6 +221,12 @@ that isn't configured on the server behaves like an empty library rather than an
 configured-but-broken library on the server (missing file, not a Calibre library), `--tag`
 omitted with no `default-library` configured on the server, or an unreachable server all print
 a one-line error to stderr and exit with status 1.
+
+`books-detail`'s `Cover Path` column shows the local filesystem path to a cover once it has
+been downloaded and cached, or `(unavailable)` when the server reports the book has a cover but
+it hasn't been cached locally yet - pass `--with-covers` to download and cache it (a book with
+no cover at all leaves the cell blank). Without `--with-covers`, `book0-remote` still reports an
+already-cached cover's local path; it just doesn't fetch anything new over the network.
 
 ## Development
 
