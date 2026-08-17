@@ -386,3 +386,110 @@ def test_get_book_details_returns_400_when_tag_omitted_and_no_default_configured
 
     assert response.status_code == 400
     assert response.json()["error"] == "TagRequiredError"
+
+
+def test_get_book_cover_returns_the_cover_bytes_for_a_known_book(
+    calibre_metadata_db: Path,
+):
+    library_root = calibre_metadata_db.parent
+    cover_path = library_root / "Frank Herbert/Dune (1)/cover.jpg"
+    cover_path.parent.mkdir(parents=True, exist_ok=True)
+    cover_path.write_bytes(b"fake-jpeg-bytes")
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books/1/cover", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    assert response.content == b"fake-jpeg-bytes"
+    assert response.headers["content-type"] == "image/jpeg"
+
+
+def test_get_book_cover_returns_404_for_a_book_with_no_cover(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books/2/cover", params={"tag": "fiction"})
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "CoverNotFoundError"
+
+
+def test_get_book_cover_returns_404_when_cover_file_is_missing_on_disk(
+    calibre_metadata_db: Path,
+):
+    # Dune (id 1) has has_cover=1 in the fixture DB, but the fixture never
+    # creates a real cover.jpg file on disk - the defensive "file missing"
+    # case.
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books/1/cover", params={"tag": "fiction"})
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "CoverNotFoundError"
+
+
+def test_get_book_cover_returns_404_for_an_unknown_book_id(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books/999/cover", params={"tag": "fiction"})
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "CoverNotFoundError"
+
+
+def test_get_book_cover_returns_404_for_an_unconfigured_tag(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books/1/cover", params={"tag": "does-not-exist"}
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "CoverNotFoundError"
+
+
+def test_get_book_cover_returns_400_when_tag_omitted_and_no_default_configured(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books/1/cover")
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "TagRequiredError"
+
+
+def test_get_book_cover_returns_404_when_configured_path_is_missing(tmp_path: Path):
+    app = create_app({"fiction": tmp_path / "does-not-exist.db"})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books/1/cover", params={"tag": "fiction"})
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "LibraryNotFoundError"
+
+
+def test_get_book_cover_returns_500_when_configured_path_is_not_a_calibre_library(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "not-calibre.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+    app = create_app({"fiction": db_path})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books/1/cover", params={"tag": "fiction"})
+
+    assert response.status_code == 500
+    assert response.json()["error"] == "NotACalibreLibraryError"

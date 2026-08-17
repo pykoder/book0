@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from book0_api.schemas import (
     AuthorOut,
@@ -16,6 +16,16 @@ from book0_core.errors import (
     TagRequiredError,
 )
 from book0_core.sqlite_gateway import SqliteLibraryGateway
+
+
+def _cover_not_found(id: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": "CoverNotFoundError",
+            "detail": f"No cover found for book {id}",
+        },
+    )
 
 
 def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> FastAPI:
@@ -142,5 +152,39 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
             )
 
         return BookDetailsResultOut.from_book_details_result(result)
+
+    @app.get("/libraries/books/{id}/cover", response_model=None)
+    def get_book_cover(id: str, tag: str | None = None) -> Response | JSONResponse:
+        try:
+            db_path = _resolve_db_path(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        if db_path is None:
+            return _cover_not_found(id)
+
+        gateway = SqliteLibraryGateway(db_path)
+        try:
+            result = gateway.get_book_details([id])
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+        except NotACalibreLibraryError as error:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "NotACalibreLibraryError", "detail": str(error)},
+            )
+
+        if not result.books:
+            return _cover_not_found(id)
+        cover_path = result.books[0].cover_path
+        if cover_path is None or cover_path is False or not Path(cover_path).is_file():
+            return _cover_not_found(id)
+
+        return Response(content=Path(cover_path).read_bytes(), media_type="image/jpeg")
 
     return app
