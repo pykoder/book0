@@ -137,6 +137,8 @@ class HttpLibraryGateway:
             return None
         if self._cache_dir is None:
             return False
+        if Path(book_id).name != book_id:
+            return False
 
         cache_path = self._cover_cache_path(book_id)
         if cache_path.is_file():

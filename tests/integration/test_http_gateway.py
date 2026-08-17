@@ -309,6 +309,24 @@ def test_get_book_details_downloads_and_caches_the_cover_when_with_covers_is_set
     assert expected_path.read_bytes() == b"server-bytes"
 
 
+def test_get_book_details_caches_the_cover_under_the_default_namespace_when_tag_is_none(
+    calibre_metadata_db: Path, tmp_path: Path
+):
+    library_root = calibre_metadata_db.parent
+    server_cover = library_root / "Frank Herbert/Dune (1)/cover.jpg"
+    server_cover.parent.mkdir(parents=True, exist_ok=True)
+    server_cover.write_bytes(b"server-bytes")
+    cache_dir = tmp_path / "cache"
+    client = _client_for({"fiction": calibre_metadata_db}, default_tag="fiction")
+    gateway = HttpLibraryGateway(client, None, with_covers=True, cache_dir=cache_dir)
+
+    result = gateway.get_book_details(["1"])
+
+    expected_path = cache_dir / "_default" / "1.jpg"
+    assert result.books[0].cover_path == str(expected_path)
+    assert expected_path.read_bytes() == b"server-bytes"
+
+
 def test_get_book_details_reports_false_cover_path_when_the_fetch_fails(
     calibre_metadata_db: Path, tmp_path: Path
 ):
@@ -323,3 +341,77 @@ def test_get_book_details_reports_false_cover_path_when_the_fetch_fails(
     result = gateway.get_book_details(["1"])
 
     assert result.books[0].cover_path is False
+
+
+class _CoverInjectionResponse:
+    """Minimal stand-in for an httpx.Response, just enough of the surface
+    HttpLibraryGateway actually uses."""
+
+    def __init__(
+        self,
+        status_code: int,
+        json_data: object = None,
+        content: bytes = b"",
+    ) -> None:
+        self.status_code = status_code
+        self._json_data = json_data
+        self.content = content
+
+    def json(self) -> object:
+        return self._json_data
+
+    def raise_for_status(self) -> None:
+        pass
+
+
+class _CoverInjectionClient:
+    """Stub httpx.Client whose books-detail response smuggles a
+    path-traversal book id, simulating a malicious/compromised server (or a
+    MITM on plaintext http://) trying to make HttpLibraryGateway write a
+    cover file outside the configured cache_dir."""
+
+    def __init__(self, malicious_id: str) -> None:
+        self._malicious_id = malicious_id
+
+    def post(
+        self, url: str, params: object = None, json: object = None
+    ) -> _CoverInjectionResponse:
+        return _CoverInjectionResponse(
+            200,
+            {
+                "books": [
+                    {
+                        "id": self._malicious_id,
+                        "title": "Evil",
+                        "pubdate": None,
+                        "authors": [],
+                        "tags": [],
+                        "publisher": None,
+                        "series": None,
+                        "has_cover": True,
+                    }
+                ],
+                "missing_ids": [],
+            },
+        )
+
+    def get(self, url: str, params: object = None) -> _CoverInjectionResponse:
+        return _CoverInjectionResponse(200, content=b"malicious-bytes")
+
+
+def test_resolve_cover_rejects_a_path_traversal_book_id(tmp_path: Path):
+    cache_dir = tmp_path / "cache"
+    client = _CoverInjectionClient("../../outside")
+    gateway = HttpLibraryGateway(
+        client, "fiction", with_covers=True, cache_dir=cache_dir
+    )
+
+    result = gateway.get_book_details(["../../outside"])
+
+    assert result.books[0].cover_path is False
+    # The would-be traversal target the un-validated code wrote to
+    # (cache_dir/fiction/../../outside.jpg resolves to tmp_path/outside.jpg)
+    # must not exist.
+    assert not (tmp_path / "outside.jpg").exists()
+    # Nothing should have been written anywhere under cache_dir either.
+    assert not cache_dir.exists() or not any(cache_dir.rglob("*"))
