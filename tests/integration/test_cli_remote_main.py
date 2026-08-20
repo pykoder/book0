@@ -366,11 +366,19 @@ def test_run_prefers_explicit_server_flag_over_book0_client_toml(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
+    # Uses valid (but irrelevant/unreachable) TOML rather than syntactically
+    # invalid TOML: since Task 12, the config file is also read for
+    # default-page-size resolution even when --server is given explicitly
+    # (see test_run_uses_default_page_size_from_client_config_when_flag_is_omitted),
+    # so a malformed file would now legitimately surface a parse error here
+    # instead of proving --server takes precedence. A valid file whose
+    # `server` key points nowhere still proves the same thing: if it were
+    # used instead of --server, the request would fail to connect.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-    (tmp_path / ".book0-client.toml").write_text("not valid toml === \n")
+    (tmp_path / ".book0-client.toml").write_text('server = "http://127.0.0.1:1"\n')
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(["--server", "unused", "--tag", "fiction"], client=client)
@@ -530,3 +538,112 @@ def test_run_reports_error_for_invalid_cover_cache_dir_config(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "Invalid book0-remote client config file" in captured.err
+
+
+def test_run_prints_a_page_and_footer_when_page_size_flag_is_given(
+    paginated_calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(create_app({"fiction": paginated_calibre_metadata_db}))
+
+    exit_code = run(
+        [
+            "--server",
+            "unused",
+            "--tag",
+            "fiction",
+            "--page",
+            "2",
+            "--page-size",
+            "2",
+        ],
+        client=client,
+    )
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Book 03" in out
+    assert "Book 04" in out
+    assert "Page 2 of 4" in out
+
+
+def test_run_uses_default_page_size_from_client_config_when_flag_is_omitted(
+    paginated_calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    (tmp_path / ".book0-client.toml").write_text(
+        'server = "http://127.0.0.1:8000"\ndefault-page-size = 3\n'
+    )
+    client = TestClient(create_app({"fiction": paginated_calibre_metadata_db}))
+
+    exit_code = run(["--server", "unused", "--tag", "fiction"], client=client)
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Page 1 of 3" in out
+    assert "Book 01" in out
+    assert "Book 04" not in out
+
+
+def test_run_is_unpaginated_when_no_page_size_is_resolvable(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        ["--server", "unused", "--tag", "fiction", "--page", "1"], client=client
+    )
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Page" not in out
+
+
+def test_run_normalizes_a_non_positive_page_to_one(
+    paginated_calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(create_app({"fiction": paginated_calibre_metadata_db}))
+
+    exit_code = run(
+        [
+            "--server",
+            "unused",
+            "--tag",
+            "fiction",
+            "--page",
+            "0",
+            "--page-size",
+            "2",
+        ],
+        client=client,
+    )
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Page 1 of 4" in out
+    assert "Book 01" in out
+
+
+def test_run_treats_a_non_positive_page_size_as_unpaginated(
+    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    client = TestClient(create_app({"fiction": calibre_metadata_db}))
+
+    exit_code = run(
+        ["--server", "unused", "--tag", "fiction", "--page-size", "0"],
+        client=client,
+    )
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Page" not in out
