@@ -242,3 +242,64 @@ def expected_book_details(
 ) -> tuple[BookDetails, BookDetails, BookDetails]:
     """Expected BookDetails with absolute cover_path values for the fixture library."""
     return _expected_details_with_cover(calibre_metadata_db.parent)
+
+
+@pytest.fixture
+def paginated_calibre_metadata_db(tmp_path: Path) -> Path:
+    """A Calibre-shaped library with 7 books/authors/publishers - enough
+    rows to exercise more than one page at a small page_size (e.g. 4 pages
+    of 2 at page_size=2), unlike the 3-book calibre_metadata_db fixture."""
+    db_path = tmp_path / "metadata.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE books (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                pubdate TEXT
+            );
+            CREATE TABLE authors (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE books_authors_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                author INTEGER NOT NULL
+            );
+            CREATE TABLE publishers (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE books_publishers_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                publisher INTEGER NOT NULL
+            );
+            """
+        )
+        connection.executemany(
+            "INSERT INTO books (id, title, pubdate) VALUES (?, ?, ?)",
+            [(i, f"Book {i:02d}", None) for i in range(1, 8)],
+        )
+        connection.executemany(
+            "INSERT INTO authors (id, name) VALUES (?, ?)",
+            [(i, f"Author {i:02d}") for i in range(1, 8)],
+        )
+        connection.executemany(
+            "INSERT INTO books_authors_link (book, author) VALUES (?, ?)",
+            [(i, i) for i in range(1, 8)],
+        )
+        connection.executemany(
+            "INSERT INTO publishers (id, name) VALUES (?, ?)",
+            [(i, f"Publisher {i:02d}") for i in range(1, 8)],
+        )
+        connection.executemany(
+            "INSERT INTO books_publishers_link (book, publisher) VALUES (?, ?)",
+            [(i, i) for i in range(1, 8)],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return db_path
