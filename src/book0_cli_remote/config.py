@@ -50,3 +50,10 @@ def load_cover_cache_dir(config_path: Path) -> Path | None:
         data = tomllib.load(config_file)
     value = data.get("cover-cache-dir")
     return Path(value) if value is not None else None
+
+
+def load_default_page_size(config_path: Path) -> int | None:
+    with config_path.open("rb") as config_file:
+        data = tomllib.load(config_file)
+    value = data.get("default-page-size")
+    return int(value) if value is not None else None
