@@ -32,6 +32,8 @@ file's `default-library`, if set. Choose `books`, `authors`, `publishers`, or `b
 uv run book0 books --tag <tag>      # or just `uv run book0 --tag <tag>` - `books` is the default
 uv run book0 authors --tag <tag>
 uv run book0 publishers --tag <tag>
+uv run book0 books --tag <tag> --page-size 20              # paginate 20 rows per page
+uv run book0 books --tag <tag> --page-size 20 --page 2     # second page
 uv run book0 books-detail --ids 1,2,3 --tag <tag>
 # or, with no --tag:
 uv run book0                        # uses the config file's default-library (books)
@@ -72,6 +74,10 @@ fiction = "/path/to/fiction"
 
 `default-library` is optional - it names the tag `book0` uses when `--tag` is omitted. Leave
 it out and an omitted `--tag` is an error (see below).
+
+Add `--page-size N` to paginate `books`/`authors`/`publishers` output N rows at a time
+(`--page` selects which page, defaulting to 1); a config file may set `default-page-size` so
+`--page-size` can be omitted. `books-detail` is never paginated.
 
 `${VAR_NAME}` placeholders are expanded against the environment here too - see the
 `book0-remote` + `book0_api` section below for the full explanation.
@@ -203,11 +209,20 @@ cover-cache-dir = "/path/to/local/cover/cache"
 downloads and caches cover images into (see below). Leave it out and `book0-remote` falls back
 to an XDG cache directory: `~/.cache/book0/covers` / `$XDG_CACHE_HOME/book0/covers`.
 
+Like `book0`, add `--page-size N` to paginate `books`/`authors`/`publishers` output N rows at a
+time (`--page` selects which page, defaulting to 1); a client config file may set
+`default-page-size` so `--page-size` can be omitted. The server's `book0-libraries.toml` may
+also set `default-page-size` as a server-side ceiling on top of the client's own
+`default-page-size`/`--page-size`, protecting the server from an unbounded query.
+`books-detail` is never paginated.
+
 ```sh
 uv run book0-remote books --server http://127.0.0.1:8000 --tag fiction
 # or just `uv run book0-remote --server ... --tag fiction` - `books` is the default
 uv run book0-remote authors --server http://127.0.0.1:8000 --tag fiction
 uv run book0-remote publishers --server http://127.0.0.1:8000 --tag fiction
+uv run book0-remote books --server http://127.0.0.1:8000 --tag fiction --page-size 20
+uv run book0-remote books --server http://127.0.0.1:8000 --tag fiction --page-size 20 --page 2
 uv run book0-remote books-detail --ids 1,2,3 --server http://127.0.0.1:8000 --tag fiction
 uv run book0-remote books-detail --ids 1,2,3 --with-covers --server http://127.0.0.1:8000 --tag fiction
 # or, with no --tag - relies on the *server's* configured default-library, not any

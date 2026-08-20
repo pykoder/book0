@@ -386,3 +386,218 @@ def test_non_calibre_sqlite_file_raises_not_a_calibre_library_error_for_book_det
 
     with pytest.raises(NotACalibreLibraryError):
         gateway.get_book_details(["1"])
+
+
+def test_list_books_then_list_authors_reuse_the_same_connection(
+    calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    gateway.list_books()
+    first_connection = gateway._connection
+    gateway.list_authors()
+    second_connection = gateway._connection
+
+    assert first_connection is not None
+    assert first_connection is second_connection
+
+
+def test_list_books_page_returns_the_first_page_directly(
+    paginated_calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+
+    result = gateway.list_books_page(1, 2)
+
+    assert [book.title for book in result.items] == ["Book 01", "Book 02"]
+    assert result.page == 1
+    assert result.page_size == 2
+    assert result.total_pages == 4
+    assert result.has_more_than_shown is False
+    assert result.handle is not None
+
+
+def test_list_books_page_handle_reuse_pulls_from_the_open_cursor_without_a_new_select(
+    paginated_calibre_metadata_db: Path,
+):
+    # The first page always costs one bounded LIMIT/OFFSET query, and continuing to
+    # the very next page costs one more (opening the continuation cursor lazily) - so
+    # the *third* page from the same session is where reuse becomes provably free:
+    # only reading further from that already-open cursor via fetchmany, no new SELECT.
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+    first = gateway.list_books_page(1, 2)
+    second = gateway.list_books_page(2, 2, handle=first.handle)
+
+    # sqlite3.Connection.execute is a read-only attribute on the built-in C type -
+    # it cannot be reassigned to a counting wrapper. set_trace_callback is sqlite3's
+    # own hook for observing every SQL statement actually prepared/executed on this
+    # connection, and (unlike connection.execute) fetchmany() against an
+    # already-open cursor does NOT re-trigger it - only a fresh execute() does. That
+    # makes it the right signal for "was a new SELECT issued", without needing to
+    # monkeypatch anything.
+    connection = gateway._connect()
+    traced_statements: list[str] = []
+    connection.set_trace_callback(traced_statements.append)
+
+    third = gateway.list_books_page(3, 2, handle=second.handle)
+
+    assert [book.title for book in third.items] == ["Book 05", "Book 06"]
+    # _count_pages always runs its own COUNT query, every call - filter that out and
+    # assert no *list*-query SELECT was newly issued for this reused page:
+    list_query_statements = [
+        statement for statement in traced_statements if "COUNT" not in statement
+    ]
+    assert list_query_statements == []
+
+
+def test_list_books_page_falls_back_correctly_when_handle_is_out_of_range(
+    paginated_calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+    first = gateway.list_books_page(1, 2)
+
+    # Page 4, not page 2 - out of the "exactly next page" range this handle covers.
+    result = gateway.list_books_page(4, 2, handle=first.handle)
+
+    assert [book.title for book in result.items] == ["Book 07"]
+    assert result.handle is None  # last page, nothing more to serve
+
+
+def test_list_books_page_falls_back_when_handle_is_from_a_different_page_size(
+    paginated_calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+    first = gateway.list_books_page(1, 2)
+
+    result = gateway.list_books_page(2, 3, handle=first.handle)
+
+    assert [book.title for book in result.items] == ["Book 04", "Book 05", "Book 06"]
+
+
+def test_list_authors_page_falls_back_when_handle_is_from_a_different_resource(
+    paginated_calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+    books_handle = gateway.list_books_page(1, 2)
+
+    # A handle minted by list_books_page's session ("books", page_size=2) handed to
+    # list_authors_page ("authors", page_size=3) must not be honored - resource
+    # mismatch means a fresh fetch, not authors read off the books session/cursor.
+    result = gateway.list_authors_page(2, 3, handle=books_handle.handle)
+
+    assert [author.name for author in result.items] == [
+        "Author 04",
+        "Author 05",
+        "Author 06",
+    ]
+
+
+def test_list_books_page_falls_back_when_handle_is_unknown(
+    paginated_calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+
+    result = gateway.list_books_page(2, 2, handle="not-a-real-handle")
+
+    assert [book.title for book in result.items] == ["Book 03", "Book 04"]
+
+
+def test_list_books_page_cold_jump_to_a_later_page_returns_correct_rows(
+    paginated_calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+
+    result = gateway.list_books_page(3, 2)
+
+    assert [book.title for book in result.items] == ["Book 05", "Book 06"]
+    assert result.page == 3
+
+
+def test_list_books_page_total_pages_is_none_past_the_counted_cap(
+    paginated_calibre_metadata_db: Path,
+):
+    # 7 books, page_size=2, max_counted_pages=2 -> cap = 4 rows, count (7) >= cap.
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db, max_counted_pages=2)
+
+    result = gateway.list_books_page(1, 2)
+
+    assert result.total_pages is None
+    assert result.has_more_than_shown is True
+
+
+def test_list_authors_page_returns_the_first_page(
+    paginated_calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+
+    result = gateway.list_authors_page(1, 3)
+
+    assert [author.name for author in result.items] == [
+        "Author 01",
+        "Author 02",
+        "Author 03",
+    ]
+    assert result.total_pages == 3
+
+
+def test_list_publishers_page_returns_the_first_page(
+    paginated_calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+
+    result = gateway.list_publishers_page(1, 3)
+
+    assert [publisher.name for publisher in result.items] == [
+        "Publisher 01",
+        "Publisher 02",
+        "Publisher 03",
+    ]
+    assert result.total_pages == 3
+
+
+def test_close_pagination_releases_the_session(paginated_calibre_metadata_db: Path):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+    first = gateway.list_books_page(1, 2)
+
+    gateway.close_pagination(first.handle)
+
+    assert first.handle not in gateway._sessions
+    # Behaves as if the handle was never given - falls back to a correct direct fetch:
+    result = gateway.list_books_page(2, 2, handle=first.handle)
+    assert [book.title for book in result.items] == ["Book 03", "Book 04"]
+
+
+def test_close_pagination_is_silent_on_an_unknown_handle(
+    paginated_calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+
+    result = gateway.close_pagination("not-a-real-handle")
+
+    assert result is None  # did not raise, degraded silently
+
+
+def test_list_books_page_expires_a_session_after_the_timeout(
+    paginated_calibre_metadata_db: Path,
+):
+    fake_time = [0.0]
+    gateway = SqliteLibraryGateway(
+        paginated_calibre_metadata_db, clock=lambda: fake_time[0]
+    )
+    first = gateway.list_books_page(1, 2)
+    assert first.handle in gateway._sessions
+
+    fake_time[0] = 61.0  # past the 60s session timeout
+    result = gateway.list_books_page(2, 2, handle=first.handle)
+
+    # The expired session was dropped before the handle could even be checked - this
+    # call fell back to a correct fresh fetch, not a resumed one.
+    assert first.handle not in gateway._sessions
+    assert [book.title for book in result.items] == ["Book 03", "Book 04"]
+
+
+def test_list_books_page_raises_library_not_found_error(tmp_path: Path):
+    gateway = SqliteLibraryGateway(tmp_path / "does-not-exist.db")
+
+    with pytest.raises(LibraryNotFoundError):
+        gateway.list_books_page(1, 2)

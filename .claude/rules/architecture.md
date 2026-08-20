@@ -19,13 +19,19 @@ src/
 │                                  # Author/Publisher/Series: frozen dataclass (id, name);
 │                                  # SeriesItem (series, index); BookDetails (id, title,
 │                                  # pubdate, authors, tags, publisher, series);
-│                                  # BookDetailsResult (books, missing_ids)
+│                                  # BookDetailsResult (books, missing_ids); PagedBooksResult,
+│                                  # PagedAuthorsResult, PagedPublishersResult (items, page,
+│                                  # page_size, total_pages, has_more_than_shown, handle)
 │   ├── errors.py                # LibraryNotFoundError, NotACalibreLibraryError,
 │                                  # TagRequiredError
 │   ├── gateway.py                # LibraryGateway(Protocol): list_books() -> list[Book],
 │                                    # list_authors() -> list[Author],
 │                                    # list_publishers() -> list[Publisher],
-│                                    # get_book_details(ids) -> BookDetailsResult
+│                                    # get_book_details(ids) -> BookDetailsResult;
+│                                    # list_books_page(page, page_size, handle) ->
+│                                    # PagedBooksResult, list_authors_page(...) ->
+│                                    # PagedAuthorsResult, list_publishers_page(...) ->
+│                                    # PagedPublishersResult, close_pagination(handle) -> None
 │   └── sqlite_gateway.py          # SqliteLibraryGateway: reads metadata.db read-only; resolves
 │                                    # a configured directory to <directory>/metadata.db itself,
 │                                    # so callers may pass either a library directory or a db file
@@ -39,22 +45,28 @@ src/
 │                                    # shared by both CLIs' books-detail dispatch
 ├── book0_config/
 │   └── config.py                  # load_libraries(path) -> LibraryConfig (libraries:
-│                                    # dict[str, Path], default_tag: str | None), reads a TOML
-│                                    # file (default_tag from an optional top-level
-│                                    # `default-library` key); shared by book0_cli and book0_api
+│                                    # dict[str, Path], default_tag: str | None,
+│                                    # default_page_size: int | None), reads a TOML file
+│                                    # (default_tag from optional `default-library` key,
+│                                    # default_page_size from optional `default-page-size` key);
+│                                    # shared by book0_cli and book0_api
 ├── book0_cli/
 │   ├── config.py                  # xdg_config_path(), find_config_file()
 │   └── main.py                    # `book0` entry point: `books`/`authors`/`publishers`/
 │                                    # `books-detail` subcommands (books is the default), --tag
 │                                    # TAG (optional, falls back to config's default_tag; raises
-│                                    # TagRequiredError if neither is set), --ids (books-detail
+│                                    # TagRequiredError if neither is set), --page/--page-size
+│                                    # (pagination for books/authors/publishers, page_size falls
+│                                    # back to config's default_page_size), --ids (books-detail
 │                                    # only, required) -> SqliteLibraryGateway
 ├── book0_api/
 │   ├── main.py                    # create_app(libraries: dict[str, Path], default_tag:
-│   │                                # str | None = None) -> FastAPI; routes take `tag` as an
-│   │                                # optional `?tag=...` query parameter (not a `{tag}` path
-│   │                                # segment), falling back to default_tag, raising
-│   │                                # TagRequiredError (mapped to 400) if neither is set
+│   │                                # str | None = None, default_page_size: int | None = None)
+│   │                                # -> FastAPI; routes take `tag` as an optional `?tag=...`
+│   │                                # query parameter, and `?page=...` and `?page_size=...`
+│   │                                # for pagination, falling back to default_tag (resp.
+│   │                                # default_page_size), raising TagRequiredError (mapped to
+│   │                                # 400) if tag is neither set nor defaulted
 │   ├── asgi.py                    # `app` wired from CONFIG_ENV_VAR (BOOK0_API_CONFIG) - the
 │   │                                # real uvicorn import target ("book0_api.asgi:app")
 │   ├── cli.py                     # `book0-api` entry point: --config PATH (required), --reload,
@@ -74,14 +86,17 @@ src/
     │                                # book0_cli/config.py's, different filename/subpath:
     │                                # .book0-client.toml / book0/client.toml), plus
     │                                # load_server(config_path: Path) -> str, xdg_cache_path(),
-    │                                # load_cover_cache_dir(config_path: Path) -> Path | None
+    │                                # load_cover_cache_dir(config_path: Path) -> Path | None,
+    │                                # load_default_page_size(config_path: Path) -> int | None
     ├── main.py                    # `book0-remote` entry point: `books`/`authors`/`publishers`/
     │                                `books-detail` subcommands (books is the default),
     │                                --server URL (optional, falls back to a .book0-client.toml
     │                                file - see config.py above - when omitted), --tag TAG
     │                                (optional - an omitted tag is sent to the server as no `tag`
     │                                query parameter, and book0_api resolves its own server-side
-    │                                default_tag), --ids (books-detail only, required),
+    │                                default_tag), --page/--page-size (pagination for
+    │                                books/authors/publishers, page_size falls back to config's
+    │                                default_page_size), --ids (books-detail only, required),
     │                                --with-covers (books-detail only, downloads and caches
     │                                covers) -> HttpLibraryGateway
     └── http_gateway.py             # HttpLibraryGateway: implements LibraryGateway over HTTP

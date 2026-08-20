@@ -168,3 +168,63 @@ def test_book_details_result_is_frozen():
 
     with pytest.raises(AttributeError):
         result.missing_ids = ("1",)
+
+
+def test_paged_books_result_holds_items_and_page_metadata():
+    from book0_core.models import PagedBooksResult
+
+    book = Book(id="1", title="Dune", authors=("Frank Herbert",), pubdate="1965-08-01")
+
+    result = PagedBooksResult(
+        items=(book,),
+        page=1,
+        page_size=10,
+        total_pages=3,
+        has_more_than_shown=False,
+        handle="abc123",
+    )
+
+    assert result.items == (book,)
+    assert result.page == 1
+    assert result.page_size == 10
+    assert result.total_pages == 3
+    assert result.has_more_than_shown is False
+    assert result.handle == "abc123"
+
+
+def test_paged_authors_result_holds_items_and_page_metadata():
+    from book0_core.models import PagedAuthorsResult
+
+    author = Author(id="1", name="Frank Herbert")
+
+    result = PagedAuthorsResult(
+        items=(author,),
+        page=2,
+        page_size=5,
+        total_pages=None,
+        has_more_than_shown=True,
+        handle=None,
+    )
+
+    assert result.items == (author,)
+    assert result.total_pages is None
+    assert result.has_more_than_shown is True
+    assert result.handle is None
+
+
+def test_paged_publishers_result_holds_items_and_page_metadata():
+    from book0_core.models import PagedPublishersResult
+
+    publisher = Publisher(id="1", name="Ace Books")
+
+    result = PagedPublishersResult(
+        items=(publisher,),
+        page=1,
+        page_size=5,
+        total_pages=1,
+        has_more_than_shown=False,
+        handle=None,
+    )
+
+    assert result.items == (publisher,)
+    assert result.total_pages == 1

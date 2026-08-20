@@ -3,6 +3,9 @@ from book0_api.schemas import (
     BookDetailsOut,
     BookDetailsResultOut,
     BookOut,
+    PagedAuthorsOut,
+    PagedBooksOut,
+    PagedPublishersOut,
     PublisherOut,
     SeriesItemOut,
     SeriesOut,
@@ -12,6 +15,9 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    PagedAuthorsResult,
+    PagedBooksResult,
+    PagedPublishersResult,
     Publisher,
     Series,
     SeriesItem,
@@ -143,3 +149,78 @@ def test_from_book_details_result_converts_books_and_missing_ids():
         books=[BookDetailsOut.from_book_details(book_details)],
         missing_ids=["99"],
     )
+
+
+def test_paged_books_out_maps_every_field():
+    book = Book(id="1", title="Dune", authors=("Frank Herbert",), pubdate="1965-08-01")
+    result = PagedBooksResult(
+        items=(book,),
+        page=2,
+        page_size=10,
+        total_pages=5,
+        has_more_than_shown=False,
+        handle="abc123",
+    )
+
+    out = PagedBooksOut.from_paged_result(result)
+
+    assert len(out.items) == 1
+    assert out.items[0].id == "1"
+    assert out.items[0].title == "Dune"
+    assert out.items[0].authors == ["Frank Herbert"]
+    assert out.items[0].pubdate == "1965-08-01"
+    assert out.page == 2
+    assert out.page_size == 10
+    assert out.total_pages == 5
+    assert out.has_more_than_shown is False
+
+
+def test_paged_books_out_reports_none_total_pages_when_capped():
+    result = PagedBooksResult(
+        items=(),
+        page=1,
+        page_size=10,
+        total_pages=None,
+        has_more_than_shown=True,
+        handle=None,
+    )
+
+    out = PagedBooksOut.from_paged_result(result)
+
+    assert out.total_pages is None
+    assert out.has_more_than_shown is True
+
+
+def test_paged_authors_out_maps_every_field():
+    author = Author(id="1", name="Frank Herbert")
+    result = PagedAuthorsResult(
+        items=(author,),
+        page=1,
+        page_size=5,
+        total_pages=1,
+        has_more_than_shown=False,
+        handle=None,
+    )
+
+    out = PagedAuthorsOut.from_paged_result(result)
+
+    assert out.items[0].id == "1"
+    assert out.items[0].name == "Frank Herbert"
+    assert out.page == 1
+
+
+def test_paged_publishers_out_maps_every_field():
+    publisher = Publisher(id="1", name="Ace Books")
+    result = PagedPublishersResult(
+        items=(publisher,),
+        page=1,
+        page_size=5,
+        total_pages=1,
+        has_more_than_shown=False,
+        handle=None,
+    )
+
+    out = PagedPublishersOut.from_paged_result(result)
+
+    assert out.items[0].id == "1"
+    assert out.items[0].name == "Ace Books"

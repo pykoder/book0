@@ -6,6 +6,7 @@ import pytest
 from book0_cli_remote.config import (
     find_config_file,
     load_cover_cache_dir,
+    load_default_page_size,
     load_server,
     xdg_cache_path,
     xdg_config_path,
@@ -148,3 +149,27 @@ def test_load_cover_cache_dir_raises_toml_decode_error_for_invalid_toml(
 
     with pytest.raises(tomllib.TOMLDecodeError):
         load_cover_cache_dir(config_path)
+
+
+def test_load_default_page_size_returns_the_configured_value(tmp_path: Path):
+    config_path = tmp_path / ".book0-client.toml"
+    config_path.write_text('server = "http://127.0.0.1:8000"\ndefault-page-size = 25\n')
+
+    assert load_default_page_size(config_path) == 25
+
+
+def test_load_default_page_size_returns_none_when_key_is_absent(tmp_path: Path):
+    config_path = tmp_path / ".book0-client.toml"
+    config_path.write_text('server = "http://127.0.0.1:8000"\n')
+
+    assert load_default_page_size(config_path) is None
+
+
+def test_load_default_page_size_raises_toml_decode_error_for_invalid_toml(
+    tmp_path: Path,
+):
+    config_path = tmp_path / ".book0-client.toml"
+    config_path.write_text("not valid toml === \n")
+
+    with pytest.raises(tomllib.TOMLDecodeError):
+        load_default_page_size(config_path)

@@ -16,6 +16,7 @@ from book0_presentation.tables import (
     render_author_table,
     render_book_details_table,
     render_book_table,
+    render_page_footer,
     render_publisher_table,
 )
 
@@ -32,12 +33,24 @@ def _build_parser() -> argparse.ArgumentParser:
 
     books_parser = subparsers.add_parser("books")
     books_parser.add_argument("--tag", help=_TAG_HELP)
+    books_parser.add_argument("--page", type=int, help="page number (1-based)")
+    books_parser.add_argument(
+        "--page-size", type=int, help="page size; enables pagination for this call"
+    )
 
     authors_parser = subparsers.add_parser("authors")
     authors_parser.add_argument("--tag", help=_TAG_HELP)
+    authors_parser.add_argument("--page", type=int, help="page number (1-based)")
+    authors_parser.add_argument(
+        "--page-size", type=int, help="page size; enables pagination for this call"
+    )
 
     publishers_parser = subparsers.add_parser("publishers")
     publishers_parser.add_argument("--tag", help=_TAG_HELP)
+    publishers_parser.add_argument("--page", type=int, help="page number (1-based)")
+    publishers_parser.add_argument(
+        "--page-size", type=int, help="page size; enables pagination for this call"
+    )
 
     books_detail_parser = subparsers.add_parser("books-detail")
     books_detail_parser.add_argument(
@@ -88,10 +101,35 @@ def run(argv: list[str] | None = None) -> int:
 
         gateway = SqliteLibraryGateway(library_path)
 
+        page_size = getattr(args, "page_size", None)
+        if page_size is None:
+            page_size = config.default_page_size
+        if page_size is not None and page_size <= 0:
+            page_size = None
+        page = getattr(args, "page", None)
+        if page is None:
+            page = 1
+        if page <= 0:
+            page = 1
+
         if args.command == "authors":
-            print(render_author_table(gateway.list_authors()))
+            if page_size is not None:
+                paged_authors = gateway.list_authors_page(page, page_size)
+                print(render_author_table(list(paged_authors.items)))
+                print(render_page_footer(paged_authors.page, paged_authors.total_pages))
+            else:
+                print(render_author_table(gateway.list_authors()))
         elif args.command == "publishers":
-            print(render_publisher_table(gateway.list_publishers()))
+            if page_size is not None:
+                paged_publishers = gateway.list_publishers_page(page, page_size)
+                print(render_publisher_table(list(paged_publishers.items)))
+                print(
+                    render_page_footer(
+                        paged_publishers.page, paged_publishers.total_pages
+                    )
+                )
+            else:
+                print(render_publisher_table(gateway.list_publishers()))
         elif args.command == "books-detail":
             ids = (
                 [segment.strip() for segment in args.ids.split(",")] if args.ids else []
@@ -103,7 +141,12 @@ def run(argv: list[str] | None = None) -> int:
             if missing_ids_message is not None:
                 print(missing_ids_message)
         else:
-            print(render_book_table(gateway.list_books()))
+            if page_size is not None:
+                paged_books = gateway.list_books_page(page, page_size)
+                print(render_book_table(list(paged_books.items)))
+                print(render_page_footer(paged_books.page, paged_books.total_pages))
+            else:
+                print(render_book_table(gateway.list_books()))
     except (LibraryNotFoundError, NotACalibreLibraryError, TagRequiredError) as error:
         print(str(error), file=sys.stderr)
         return 1

@@ -420,3 +420,85 @@ def test_resolve_cover_rejects_a_path_traversal_book_id(tmp_path: Path):
     assert not (tmp_path / "outside.jpg").exists()
     # Nothing should have been written anywhere under cache_dir either.
     assert not cache_dir.exists() or not any(cache_dir.rglob("*"))
+
+
+def test_list_books_page_returns_the_requested_page(
+    paginated_calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": paginated_calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    result = gateway.list_books_page(2, 2)
+
+    assert [book.title for book in result.items] == ["Book 03", "Book 04"]
+    assert result.page == 2
+    assert result.page_size == 2
+    assert result.total_pages == 4
+    assert result.has_more_than_shown is False
+
+
+def test_list_books_page_never_sends_the_caller_supplied_handle_over_the_wire(
+    paginated_calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": paginated_calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    sent_requests = []
+    original_get = client.get
+
+    def _capturing_get(*args, **kwargs):
+        sent_requests.append(kwargs.get("params", {}))
+        return original_get(*args, **kwargs)
+
+    client.get = _capturing_get  # type: ignore[method-assign]
+
+    gateway.list_books_page(1, 2, handle="some-client-side-handle-should-not-be-sent")
+
+    assert all("handle" not in params for params in sent_requests)
+
+
+def test_list_authors_page_returns_the_requested_page(
+    paginated_calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": paginated_calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    result = gateway.list_authors_page(1, 3)
+
+    assert [author.name for author in result.items] == [
+        "Author 01",
+        "Author 02",
+        "Author 03",
+    ]
+
+
+def test_list_publishers_page_returns_the_requested_page(
+    paginated_calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": paginated_calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    result = gateway.list_publishers_page(1, 3)
+
+    assert [publisher.name for publisher in result.items] == [
+        "Publisher 01",
+        "Publisher 02",
+        "Publisher 03",
+    ]
+
+
+def test_list_books_page_raises_library_not_found_error(tmp_path: Path):
+    client = _client_for({"fiction": tmp_path / "does-not-exist.db"})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    with pytest.raises(LibraryNotFoundError):
+        gateway.list_books_page(1, 2)
+
+
+def test_close_pagination_is_a_no_op(paginated_calibre_metadata_db: Path):
+    client = _client_for({"fiction": paginated_calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    result = gateway.close_pagination("anything")
+
+    assert result is None  # did not raise, no network call needed
