@@ -808,7 +808,9 @@ def test_close_pagination_is_silent_on_an_unknown_handle(
 ):
     gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
 
-    gateway.close_pagination("not-a-real-handle")  # must not raise
+    result = gateway.close_pagination("not-a-real-handle")
+
+    assert result is None  # did not raise, degraded silently
 
 
 def test_list_books_page_expires_a_session_after_the_timeout(
@@ -1746,7 +1748,9 @@ def test_close_pagination_is_a_no_op(paginated_calibre_metadata_db: Path):
     client = _client_for({"fiction": paginated_calibre_metadata_db})
     gateway = HttpLibraryGateway(client, "fiction")
 
-    gateway.close_pagination("anything")  # must not raise, no network call needed
+    result = gateway.close_pagination("anything")
+
+    assert result is None  # did not raise, no network call needed
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
