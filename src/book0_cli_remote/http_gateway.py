@@ -13,6 +13,9 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    PagedAuthorsResult,
+    PagedBooksResult,
+    PagedPublishersResult,
     Publisher,
     Series,
     SeriesItem,
@@ -41,6 +44,12 @@ class HttpLibraryGateway:
 
     def _params(self) -> dict[str, str]:
         return {"tag": self._tag} if self._tag is not None else {}
+
+    def _page_params(self, page: int, page_size: int) -> dict[str, str | int]:
+        params: dict[str, str | int] = dict(self._params())
+        params["page"] = page
+        params["page_size"] = page_size
+        return params
 
     def list_books(self) -> list[Book]:
         response = self._client.get("/libraries/books", params=self._params())
@@ -82,6 +91,90 @@ class HttpLibraryGateway:
         response.raise_for_status()
 
         return [Publisher(id=row["id"], name=row["name"]) for row in response.json()]
+
+    def list_books_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedBooksResult:
+        response = self._client.get(
+            "/libraries/books", params=self._page_params(page, page_size)
+        )
+
+        if response.status_code in (400, 404, 500):
+            body = response.json()
+            error_type = _ERROR_TYPES[body["error"]]
+            raise error_type(body["detail"])
+        response.raise_for_status()
+
+        body = response.json()
+        return PagedBooksResult(
+            items=tuple(
+                Book(
+                    id=row["id"],
+                    title=row["title"],
+                    authors=tuple(row["authors"]),
+                    pubdate=row["pubdate"],
+                )
+                for row in body["items"]
+            ),
+            page=body["page"],
+            page_size=body["page_size"],
+            total_pages=body["total_pages"],
+            has_more_than_shown=body["has_more_than_shown"],
+            handle=None,
+        )
+
+    def list_authors_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedAuthorsResult:
+        response = self._client.get(
+            "/libraries/authors", params=self._page_params(page, page_size)
+        )
+
+        if response.status_code in (400, 404, 500):
+            body = response.json()
+            error_type = _ERROR_TYPES[body["error"]]
+            raise error_type(body["detail"])
+        response.raise_for_status()
+
+        body = response.json()
+        return PagedAuthorsResult(
+            items=tuple(
+                Author(id=row["id"], name=row["name"]) for row in body["items"]
+            ),
+            page=body["page"],
+            page_size=body["page_size"],
+            total_pages=body["total_pages"],
+            has_more_than_shown=body["has_more_than_shown"],
+            handle=None,
+        )
+
+    def list_publishers_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedPublishersResult:
+        response = self._client.get(
+            "/libraries/publishers", params=self._page_params(page, page_size)
+        )
+
+        if response.status_code in (400, 404, 500):
+            body = response.json()
+            error_type = _ERROR_TYPES[body["error"]]
+            raise error_type(body["detail"])
+        response.raise_for_status()
+
+        body = response.json()
+        return PagedPublishersResult(
+            items=tuple(
+                Publisher(id=row["id"], name=row["name"]) for row in body["items"]
+            ),
+            page=body["page"],
+            page_size=body["page_size"],
+            total_pages=body["total_pages"],
+            has_more_than_shown=body["has_more_than_shown"],
+            handle=None,
+        )
+
+    def close_pagination(self, handle: str) -> None:
+        return None
 
     def get_book_details(self, ids: list[str]) -> BookDetailsResult:
         response = self._client.post(
