@@ -72,17 +72,20 @@ never scans more than 100 pages' worth of rows to find out. This applies identic
 chosen deliberately over exploiting local SQLite's cheap exact-count capability, so both
 backends report page counts the same way.
 
-## The handle: advisory, sequential-only, never required
+## The handle: advisory, never required
 
-A handle from a previous `PagedResult` may be passed to the *next* call to reuse an
-already-open resource — but only when the request is for **exactly the page that resource would
-yield next** (same resource type, same `page_size`, `page` one greater than what was last
-returned). Any other case — no handle, an unknown/expired handle, a handle for a different
-resource/page-size, or a `page` that isn't the immediate next one (a cold jump to page 5, a
-repeat of an already-served page) — is treated identically: a fresh, direct, non-sequential
-fetch for exactly the requested page. Handle reuse is purely an optimization for the common
-"iterate forward one page at a time" pattern; it is never required for correctness, and passing
-a garbage or stale handle never raises — it degrades to the same fresh-fetch path as omitting it.
+A handle from a previous `PagedResult` may be passed to a later call to reuse whatever
+already-open resource that handle refers to, whenever the requested page falls within the range
+that resource can currently serve — not only the exact immediate-next page. **Exactly which
+requests count as "in range" (how far ahead/behind a held session can serve from, how much it
+buffers, whether it's a strictly-forward generator or something with more slack) is an
+implementation detail, not part of this contract.** What every implementation must guarantee:
+a handle is always optional; an implementation is always free to decide a given handle isn't
+useful for a given request (unknown/expired handle, wrong resource/page-size, a page outside
+whatever range it's willing to serve) and fall back to a fresh, direct, correct fetch for
+exactly the requested page — transparently, never as an error. Handle reuse is purely an
+optimization; no caller-visible behavior depends on whether a given call happened to reuse a
+session or not, only on getting the right page back.
 
 `close_pagination(handle)` releases whatever resource is tied to a handle early, for a caller
 that stops iterating before reaching the end. Idempotent and silent on an unknown handle (no
@@ -98,8 +101,9 @@ signature or return type):
    and `get_book_details` all switch to a shared `self._connect()` that opens once and is
    reused by every subsequent call on the same instance — this is what makes "list a page of
    books, then `get_book_details` for that page's ids" cheap when both happen through one
-   gateway instance, independent of the handle mechanism (which only helps *sequential
-   same-resource* paging, not this cross-method reuse). No new public method for this: adding a
+   gateway instance, independent of the handle mechanism (which only ever helps same-resource
+   paging within whatever range a held session can serve, not this cross-method reuse). No new
+   public method for this: adding a
    connection-level `close()` was considered and rejected, because it would exist on
    `SqliteLibraryGateway` but not on the `LibraryGateway` Protocol, breaking the moment TODO
    item 3 (annotating gateway construction sites as `LibraryGateway`-typed) is addressed. The
@@ -107,13 +111,16 @@ signature or return type):
    garbage collection for any longer-lived consumer (a script holding a `SqliteLibraryGateway`
    instance directly) — matching this project's existing absence of any explicit CLI-level
    cleanup/shutdown logic.
-2. **A small table of live pagination sessions**, keyed by handle, each holding a Python
-   generator (`yield`-based) positioned at "the next page to produce" for one resource type,
-   plus a last-access timestamp. `list_books_page` (etc.) looks up the session for a given
-   handle; if it matches (same resource, same `page_size`, `next_page == page`), it pulls the
-   next `page_size` rows from that generator via `itertools.islice`; otherwise it starts a fresh
-   generator seeked directly to the requested page (still just a `LIMIT`/`OFFSET` query — a
-   "fresh" fetch is not more expensive than today's unpaginated query, just bounded).
+2. **A small table of live pagination sessions**, keyed by handle, each backed by a Python
+   generator (`yield`-based) for one resource type, plus a last-access timestamp.
+   `list_books_page` (etc.) looks up the session for a given handle; if the implementation
+   judges the requested page servable from that session's current state (same resource, same
+   `page_size`, and whatever range check `writing-plans` settles on — the simplest version
+   being "exactly the next page a forward-only generator would yield," a more capable version
+   buffering a small window so a slight back-step or a repeat of the last page or two is also
+   servable without a re-query), it pulls the requested rows from there; otherwise it starts a
+   fresh generator seeked directly to the requested page (still just a `LIMIT`/`OFFSET` query —
+   a "fresh" fetch is not more expensive than today's unpaginated query, just bounded).
    `close_pagination(handle)` calls `.close()` on that session's generator (releasing whatever
    cursor/resources it holds via its own `finally` block) and drops it from the table.
 3. **Lazy timeout expiry**: before consulting the session table, sessions whose last-access
@@ -247,19 +254,23 @@ No new `book0_core.errors` class — every case above degrades gracefully rather
   equivalents) field-by-field mapping.
 - **Integration**, `SqliteLibraryGateway`: against the real fixture DB (needs a larger fixture
   library than today's 3-book one to exercise more than one page — a new fixture with enough
-  rows to produce at least 3 pages at a small page size). Cover: page 1 direct; page 2 via a
-  valid sequential handle actually reuses the existing session rather than starting a fresh one
-  (the connection itself is shared by every call regardless, paginated or not, so the
-  observable signal has to be the session/generator specifically — e.g. an instrumented query
-  count showing the second page issued no new `SELECT`, only continued pulling from the first
-  one's already-open cursor); page 2 via a *stale* handle (from a different
-  page_size or resource) falls back to a correct fresh fetch; a cold jump (page 5 with no
-  handle) returns the correct rows; `total_pages` exact under the 100-page cap and `None`/
-  `has_more_than_shown=True` over it (may need a smaller cap injected for testability rather
-  than the real 100, or a fixture library sized to actually exceed it — decide during planning);
-  `close_pagination` actually releases (a subsequent call with that handle behaves as if it was
-  never given); timeout expiry (inject a controllable clock rather than sleeping 60 real
-  seconds in a test).
+  rows to produce at least 3 pages at a small page size). Cover: page 1 direct; a page the
+  implementation's own range logic considers servable from a valid handle actually reuses the
+  existing session rather than starting a fresh one (the connection itself is shared by every
+  call regardless, paginated or not, so the observable signal has to be the session/generator
+  specifically — e.g. an instrumented query count showing no new `SELECT` for the reused page,
+  only continued pulling from the already-open cursor; exactly which page(s) count as "in
+  range" is whatever `writing-plans` settles on, and the test should assert against that actual
+  behavior, not a hardcoded assumption of "next page only"); a request outside whatever range
+  the session covers falls back to a correct fresh fetch, still returning the right rows; a
+  handle from a *different* resource or `page_size` always falls back too, regardless of range
+  (that part is a hard contract requirement, not implementation-defined); a cold jump (e.g. page
+  5 with no handle at all) returns the correct rows; `total_pages` exact under the 100-page cap
+  and `None`/`has_more_than_shown=True` over it (may need a smaller cap injected for
+  testability rather than the real 100, or a fixture library sized to actually exceed it —
+  decide during planning); `close_pagination` actually releases (a subsequent call with that
+  handle behaves as if it was never given); timeout expiry (inject a controllable clock rather
+  than sleeping 60 real seconds in a test).
 - **Integration**, `HttpLibraryGateway`: against a real `TestClient`-backed app — page
   params round-trip correctly; a `handle` passed by the caller is never sent over the wire
   (assert on the actual request, not just the response); server-side `default-page-size`
