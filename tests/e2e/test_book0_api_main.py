@@ -49,14 +49,14 @@ def test_list_books_resolves_metadata_db_when_configured_path_is_a_directory(
     ]
 
 
-def test_list_books_returns_empty_list_for_an_unknown_tag(calibre_metadata_db: Path):
+def test_list_books_returns_400_for_an_unknown_tag(calibre_metadata_db: Path):
     app = create_app({"fiction": calibre_metadata_db})
     client = TestClient(app)
 
     response = client.get("/libraries/books", params={"tag": "does-not-exist"})
 
-    assert response.status_code == 200
-    assert response.json() == []
+    assert response.status_code == 400
+    assert response.json()["error"] == "TagRequiredError"
 
 
 def test_list_books_returns_404_when_configured_path_is_missing(tmp_path: Path):
@@ -124,14 +124,14 @@ def test_list_authors_returns_expected_authors_for_a_known_tag(
     ]
 
 
-def test_list_authors_returns_empty_list_for_an_unknown_tag(calibre_metadata_db: Path):
+def test_list_authors_returns_400_for_an_unknown_tag(calibre_metadata_db: Path):
     app = create_app({"fiction": calibre_metadata_db})
     client = TestClient(app)
 
     response = client.get("/libraries/authors", params={"tag": "does-not-exist"})
 
-    assert response.status_code == 200
-    assert response.json() == []
+    assert response.status_code == 400
+    assert response.json()["error"] == "TagRequiredError"
 
 
 def test_list_authors_returns_404_when_configured_path_is_missing(tmp_path: Path):
@@ -200,7 +200,7 @@ def test_list_publishers_returns_expected_publishers_for_a_known_tag(
     ]
 
 
-def test_list_publishers_returns_empty_list_for_an_unknown_tag(
+def test_list_publishers_returns_400_for_an_unknown_tag(
     calibre_metadata_db: Path,
 ):
     app = create_app({"fiction": calibre_metadata_db})
@@ -208,8 +208,8 @@ def test_list_publishers_returns_empty_list_for_an_unknown_tag(
 
     response = client.get("/libraries/publishers", params={"tag": "does-not-exist"})
 
-    assert response.status_code == 200
-    assert response.json() == []
+    assert response.status_code == 400
+    assert response.json()["error"] == "TagRequiredError"
 
 
 def test_list_publishers_returns_404_when_configured_path_is_missing(tmp_path: Path):
@@ -310,7 +310,7 @@ def test_get_book_details_reports_missing_ids_for_a_known_tag(
     assert len(body["books"]) == 1
 
 
-def test_get_book_details_returns_all_requested_ids_as_missing_for_an_unknown_tag(
+def test_get_book_details_returns_400_for_an_unknown_tag(
     calibre_metadata_db: Path,
 ):
     app = create_app({"fiction": calibre_metadata_db})
@@ -322,8 +322,8 @@ def test_get_book_details_returns_all_requested_ids_as_missing_for_an_unknown_ta
         json={"ids": ["1", "2"]},
     )
 
-    assert response.status_code == 200
-    assert response.json() == {"books": [], "missing_ids": ["1", "2"]}
+    assert response.status_code == 400
+    assert response.json()["error"] == "TagRequiredError"
 
 
 def test_get_book_details_returns_404_when_configured_path_is_missing(
@@ -439,7 +439,7 @@ def test_get_book_cover_returns_404_for_an_unknown_book_id(calibre_metadata_db: 
     assert response.json()["error"] == "CoverNotFoundError"
 
 
-def test_get_book_cover_returns_404_for_an_unconfigured_tag(calibre_metadata_db: Path):
+def test_get_book_cover_returns_400_for_an_unconfigured_tag(calibre_metadata_db: Path):
     app = create_app({"fiction": calibre_metadata_db})
     client = TestClient(app)
 
@@ -447,8 +447,8 @@ def test_get_book_cover_returns_404_for_an_unconfigured_tag(calibre_metadata_db:
         "/libraries/books/1/cover", params={"tag": "does-not-exist"}
     )
 
-    assert response.status_code == 404
-    assert response.json()["error"] == "CoverNotFoundError"
+    assert response.status_code == 400
+    assert response.json()["error"] == "TagRequiredError"
 
 
 def test_get_book_cover_returns_400_when_tag_omitted_and_no_default_configured(

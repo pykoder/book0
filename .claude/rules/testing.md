@@ -27,9 +27,9 @@ No task is done without tests. This is not optional.
   synchronously. Plain `httpx.Client(transport=httpx.ASGITransport(app=app))` does **not**
   work for this - `ASGITransport` only implements the async transport interface, and both
   gateways are sync.
-- Cover the nominal case, the boundary cases (empty library, an unconfigured tag treated as
-  an empty library (book0_api/book0-remote only - book0_cli's --tag reports an unconfigured
-  tag as an error), `NULL` `pubdate`, a book with multiple authors), and the error cases
+- Cover the nominal case, the boundary cases (empty library, an unconfigured tag reported as
+  `TagRequiredError`, consistently across `book0_cli`, `book0_api`, and `book0-remote`,
+  `NULL` `pubdate`, a book with multiple authors), and the error cases
   (missing file, file exists but is not a Calibre library, and for the remote path: the
   matching HTTP status/body, plus an unreachable server) for every path that touches the
   database, the API, or either CLI's error handling.
@@ -37,10 +37,10 @@ No task is done without tests. This is not optional.
   particular `book0_cli/main.py::run`'s tag-resolution branches (`--tag` omitted vs.
   given, config file found vs. not found, tag present vs. absent in a found config
   file), both branches of `SqliteLibraryGateway.__init__`'s directory-vs-file resolution,
-  both caught exception types in either CLI's `run()`, and all four response branches in
+  both caught exception types in either CLI's `run()`, and all three response branches in
   each of `book0_api/main.py`'s routes (`list_books`, `list_authors`, `list_publishers`
-  today) - unknown tag, `LibraryNotFoundError`, `NotACalibreLibraryError`,
-  `TagRequiredError` - and
+  today) - `TagRequiredError` (covers both no-tag-resolvable and unconfigured-tag causes),
+  `LibraryNotFoundError`, `NotACalibreLibraryError` - and
   `book0_api/cli.py::run`'s argument branches (`--config` missing, `--reload` given vs.
   omitted, `--listen` given vs. defaulted, `--listen` with an unsupported scheme,
   `--server-config` given vs. omitted, `--server-config` pointing at a missing/unreadable/

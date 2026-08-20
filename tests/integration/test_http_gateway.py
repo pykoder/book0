@@ -44,11 +44,14 @@ def test_list_books_returns_expected_books_for_a_known_tag(calibre_metadata_db: 
     assert gateway.list_books() == CALIBRE_LIBRARY_BOOKS
 
 
-def test_list_books_returns_empty_list_for_an_unknown_tag(calibre_metadata_db: Path):
+def test_list_books_raises_tag_required_error_for_an_unknown_tag(
+    calibre_metadata_db: Path,
+):
     client = _client_for({"fiction": calibre_metadata_db})
     gateway = HttpLibraryGateway(client, "does-not-exist")
 
-    assert gateway.list_books() == []
+    with pytest.raises(TagRequiredError):
+        gateway.list_books()
 
 
 def test_list_books_raises_library_not_found_error(tmp_path: Path):
@@ -83,11 +86,14 @@ def test_list_authors_returns_expected_authors_for_a_known_tag(
     assert gateway.list_authors() == CALIBRE_LIBRARY_AUTHORS
 
 
-def test_list_authors_returns_empty_list_for_an_unknown_tag(calibre_metadata_db: Path):
+def test_list_authors_raises_tag_required_error_for_an_unknown_tag(
+    calibre_metadata_db: Path,
+):
     client = _client_for({"fiction": calibre_metadata_db})
     gateway = HttpLibraryGateway(client, "does-not-exist")
 
-    assert gateway.list_authors() == []
+    with pytest.raises(TagRequiredError):
+        gateway.list_authors()
 
 
 def test_list_authors_raises_library_not_found_error(tmp_path: Path):
@@ -122,13 +128,14 @@ def test_list_publishers_returns_expected_publishers_for_a_known_tag(
     assert gateway.list_publishers() == CALIBRE_LIBRARY_PUBLISHERS
 
 
-def test_list_publishers_returns_empty_list_for_an_unknown_tag(
+def test_list_publishers_raises_tag_required_error_for_an_unknown_tag(
     calibre_metadata_db: Path,
 ):
     client = _client_for({"fiction": calibre_metadata_db})
     gateway = HttpLibraryGateway(client, "does-not-exist")
 
-    assert gateway.list_publishers() == []
+    with pytest.raises(TagRequiredError):
+        gateway.list_publishers()
 
 
 def test_list_publishers_raises_library_not_found_error(tmp_path: Path):
@@ -228,16 +235,14 @@ def test_get_book_details_reports_missing_ids_for_a_known_tag(
     assert result.missing_ids == ("999",)
 
 
-def test_get_book_details_treats_unknown_tag_as_all_missing(
+def test_get_book_details_raises_tag_required_error_for_an_unknown_tag(
     calibre_metadata_db: Path,
 ):
     client = _client_for({"fiction": calibre_metadata_db})
     gateway = HttpLibraryGateway(client, "does-not-exist")
 
-    result = gateway.get_book_details(["1", "2"])
-
-    assert result.books == ()
-    assert set(result.missing_ids) == {"1", "2"}
+    with pytest.raises(TagRequiredError):
+        gateway.get_book_details(["1", "2"])
 
 
 def test_get_book_details_raises_library_not_found_error(tmp_path: Path):

@@ -31,13 +31,16 @@ def _cover_not_found(id: str) -> JSONResponse:
 def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> FastAPI:
     app = FastAPI()
 
-    def _resolve_db_path(tag: str | None) -> Path | None:
+    def _resolve_db_path(tag: str | None) -> Path:
         resolved_tag = tag if tag is not None else default_tag
         if resolved_tag is None:
             raise TagRequiredError(
                 "No tag given and no default-library configured for this server"
             )
-        return libraries.get(resolved_tag)
+        db_path = libraries.get(resolved_tag)
+        if db_path is None:
+            raise TagRequiredError(f"Unknown library tag: {resolved_tag!r}")
+        return db_path
 
     @app.get("/libraries/books", response_model=None)
     def list_books(tag: str | None = None) -> list[BookOut] | JSONResponse:
@@ -48,8 +51,6 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
             )
-        if db_path is None:
-            return []
 
         gateway = SqliteLibraryGateway(db_path)
         try:
@@ -76,8 +77,6 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
             )
-        if db_path is None:
-            return []
 
         gateway = SqliteLibraryGateway(db_path)
         try:
@@ -104,8 +103,6 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
             )
-        if db_path is None:
-            return []
 
         gateway = SqliteLibraryGateway(db_path)
         try:
@@ -134,8 +131,6 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
             )
-        if db_path is None:
-            return BookDetailsResultOut(books=[], missing_ids=body.ids)
 
         gateway = SqliteLibraryGateway(db_path)
         try:
@@ -162,8 +157,6 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
             )
-        if db_path is None:
-            return _cover_not_found(id)
 
         gateway = SqliteLibraryGateway(db_path)
         try:

@@ -46,18 +46,6 @@ concrete; the commit or plan that resolves an item removes its line.
   to design the multi-library architecture itself — no design exists yet. Revisit via
   brainstorming when picked up.
 
-- [ ] **`book0_api`'s unknown-tag `books-detail` path echoes raw, un-deduped ids.** Found
-  during the final-review of the book-id-normalization fix (2026-08-14):
-  `src/book0_api/main.py`'s `get_book_details` route, on an unknown/unconfigured tag, returns
-  `BookDetailsResultOut(books=[], missing_ids=body.ids)` — the raw request body ids verbatim,
-  not deduped/whitespace-stripped/order-normalized the way the known-tag path's
-  `SqliteLibraryGateway.get_book_details` now is. `book0-remote --tag <unknown>` with a
-  duplicated or malformed id list would print the ids back exactly as sent, disagreeing with
-  what the same ids would produce against a known tag. Low impact (the unknown-tag path is
-  already a deliberately degenerate anti-enumeration case), and fixing it would mean either
-  duplicating partition logic in `book0_api` or expanding that plan's file list — deferred
-  rather than folded into that fix wave.
-
 - [ ] **(undesigned) `books-detail` response projection + pagination.** Raised during
   brainstorming for the id-normalization fix (2026-08-14) and deliberately split off rather
   than folded in. The user's personal Calibre library can hold tens of thousands of books, so

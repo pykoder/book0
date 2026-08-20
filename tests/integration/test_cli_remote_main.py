@@ -30,15 +30,17 @@ def test_run_prints_table_for_a_known_tag(
     assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
 
 
-def test_run_prints_no_books_found_for_an_unknown_tag(
+def test_run_reports_unknown_tag_on_stderr_and_exits_with_status_1(
     calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
 ):
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(["--server", "unused", "--tag", "does-not-exist"], client=client)
 
-    assert exit_code == 0
-    assert capsys.readouterr().out == "No books found.\n"
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
 
 
 def test_run_reports_library_not_found_on_stderr_and_exits_with_status_1(
@@ -80,7 +82,7 @@ def test_run_prints_author_table_for_a_known_tag(
     )
 
 
-def test_run_prints_no_authors_found_for_an_unknown_tag(
+def test_run_reports_unknown_tag_on_stderr_for_authors_and_exits_with_status_1(
     calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
 ):
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
@@ -89,8 +91,10 @@ def test_run_prints_no_authors_found_for_an_unknown_tag(
         ["authors", "--server", "unused", "--tag", "does-not-exist"], client=client
     )
 
-    assert exit_code == 0
-    assert capsys.readouterr().out == "No authors found.\n"
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
 
 
 def test_run_lists_books_when_subcommand_is_explicit(
@@ -130,7 +134,7 @@ def test_run_prints_publisher_table_for_a_known_tag(
     )
 
 
-def test_run_prints_no_publishers_found_for_an_unknown_tag(
+def test_run_reports_unknown_tag_on_stderr_for_publishers_and_exits_with_status_1(
     calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
 ):
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
@@ -140,8 +144,10 @@ def test_run_prints_no_publishers_found_for_an_unknown_tag(
         client=client,
     )
 
-    assert exit_code == 0
-    assert capsys.readouterr().out == "No publishers found.\n"
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
 
 
 def test_run_help_mentions_the_publishers_subcommand(
@@ -260,7 +266,7 @@ def test_run_dedupes_and_strips_whitespace_from_requested_book_detail_ids(
     )
 
 
-def test_run_reports_all_ids_missing_for_an_unconfigured_tag(
+def test_run_reports_unknown_tag_on_stderr_for_books_detail_and_exits_with_status_1(
     calibre_metadata_db: Path,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -285,9 +291,10 @@ def test_run_reports_all_ids_missing_for_an_unconfigured_tag(
         client=client,
     )
 
-    assert exit_code == 0
-    captured = capsys.readouterr().out
-    assert captured == "No book details found.\nMissing ids: 1, 2\n"
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() != ""
 
 
 def test_run_reports_usage_error_when_ids_is_omitted_entirely(

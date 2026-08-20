@@ -84,8 +84,7 @@ def run(argv: list[str] | None = None) -> int:
 
         library_path = config.libraries.get(tag)
         if library_path is None:
-            print(f"Unknown library tag: {tag!r}", file=sys.stderr)
-            return 1
+            raise TagRequiredError(f"Unknown library tag: {tag!r}")
 
         gateway = SqliteLibraryGateway(library_path)
 
