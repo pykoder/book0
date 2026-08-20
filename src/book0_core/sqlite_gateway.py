@@ -1,5 +1,9 @@
 import re
+import secrets
 import sqlite3
+import time
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
@@ -8,6 +12,9 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    PagedAuthorsResult,
+    PagedBooksResult,
+    PagedPublishersResult,
     Publisher,
     Series,
     SeriesItem,
@@ -74,13 +81,38 @@ _UNDEFINED_PUBDATE_PREFIX = "0101-01-01"
 
 _VALID_ID_PATTERN = re.compile(r"^[1-9]\d*$")
 
+_COUNT_BOOKS_QUERY = "SELECT COUNT(*) FROM (SELECT id FROM books LIMIT ?)"
+_COUNT_AUTHORS_QUERY = "SELECT COUNT(*) FROM (SELECT id FROM authors LIMIT ?)"
+_COUNT_PUBLISHERS_QUERY = "SELECT COUNT(*) FROM (SELECT id FROM publishers LIMIT ?)"
+
+_DEFAULT_MAX_COUNTED_PAGES = 100
+_SESSION_TIMEOUT_SECONDS = 60.0
+
+
+@dataclass
+class _PaginationSession:
+    resource: str
+    page_size: int
+    expected_next_page: int
+    rows_generator: Iterator[list[tuple[object, ...]]]
+    last_access: float
+
 
 class SqliteLibraryGateway:
-    def __init__(self, library_path: Path) -> None:
+    def __init__(
+        self,
+        library_path: Path,
+        *,
+        max_counted_pages: int = _DEFAULT_MAX_COUNTED_PAGES,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._db_path = (
             library_path / "metadata.db" if library_path.is_dir() else library_path
         )
         self._connection: sqlite3.Connection | None = None
+        self._max_counted_pages = max_counted_pages
+        self._clock = clock
+        self._sessions: dict[str, _PaginationSession] = {}
 
     def _connect(self) -> sqlite3.Connection:
         if not self._db_path.exists():
@@ -114,6 +146,160 @@ class SqliteLibraryGateway:
         connection = self._connect()
         rows = connection.execute(_LIST_PUBLISHERS_QUERY).fetchall()
         return [Publisher(id=str(row[0]), name=row[1]) for row in rows]
+
+    def list_books_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedBooksResult:
+        rows, out_handle, total_pages, has_more = self._paged_rows(
+            resource="books",
+            query=_LIST_BOOKS_QUERY,
+            count_query=_COUNT_BOOKS_QUERY,
+            page=page,
+            page_size=page_size,
+            handle=handle,
+        )
+        return PagedBooksResult(
+            items=tuple(self._row_to_book(row) for row in rows),
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=out_handle,
+        )
+
+    def list_authors_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedAuthorsResult:
+        rows, out_handle, total_pages, has_more = self._paged_rows(
+            resource="authors",
+            query=_LIST_AUTHORS_QUERY,
+            count_query=_COUNT_AUTHORS_QUERY,
+            page=page,
+            page_size=page_size,
+            handle=handle,
+        )
+        return PagedAuthorsResult(
+            items=tuple(
+                Author(id=str(row[0]), name=row[1])  # type: ignore[arg-type]
+                for row in rows
+            ),
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=out_handle,
+        )
+
+    def list_publishers_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedPublishersResult:
+        rows, out_handle, total_pages, has_more = self._paged_rows(
+            resource="publishers",
+            query=_LIST_PUBLISHERS_QUERY,
+            count_query=_COUNT_PUBLISHERS_QUERY,
+            page=page,
+            page_size=page_size,
+            handle=handle,
+        )
+        return PagedPublishersResult(
+            items=tuple(
+                Publisher(id=str(row[0]), name=row[1])  # type: ignore[arg-type]
+                for row in rows
+            ),
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=out_handle,
+        )
+
+    def close_pagination(self, handle: str) -> None:
+        session = self._sessions.pop(handle, None)
+        if session is not None:
+            session.rows_generator.close()  # type: ignore[attr-defined]
+
+    def _paged_rows(
+        self,
+        *,
+        resource: str,
+        query: str,
+        count_query: str,
+        page: int,
+        page_size: int,
+        handle: str | None,
+    ) -> tuple[list[tuple[object, ...]], str | None, int | None, bool]:
+        connection = self._connect()
+        self._expire_stale_sessions()
+
+        session = self._sessions.get(handle) if handle is not None else None
+        if (
+            session is not None
+            and session.resource == resource
+            and session.page_size == page_size
+            and session.expected_next_page == page
+        ):
+            rows = next(session.rows_generator)
+            session.expected_next_page += 1
+            session.last_access = self._clock()
+            active_handle = handle
+        else:
+            generator = self._paged_rows_generator(connection, query, page_size, page)
+            rows = next(generator)
+            active_handle = secrets.token_hex(16)
+            self._sessions[active_handle] = _PaginationSession(
+                resource=resource,
+                page_size=page_size,
+                expected_next_page=page + 1,
+                rows_generator=generator,
+                last_access=self._clock(),
+            )
+
+        total_pages, has_more = self._count_pages(connection, count_query, page_size)
+        out_handle: str | None = active_handle
+        if total_pages is not None and page >= total_pages:
+            out_handle = None
+        if out_handle is None:
+            self.close_pagination(active_handle)  # type: ignore[arg-type]
+        return rows, out_handle, total_pages, has_more
+
+    @staticmethod
+    def _paged_rows_generator(
+        connection: sqlite3.Connection, query: str, page_size: int, start_page: int
+    ) -> Iterator[list[tuple[object, ...]]]:
+        # First page: one bounded LIMIT/OFFSET query, seeked directly to start_page -
+        # no more expensive than today's unpaginated query, just bounded. Every
+        # subsequent page this same generator yields (i.e. reused via a handle) then
+        # pulls from one already-open, unbounded-from-here cursor via fetchmany - no
+        # new SELECT per continued page. The cursor is opened lazily (only once the
+        # caller actually continues past the first page), not on every fresh fetch.
+        offset = (start_page - 1) * page_size
+        first_rows = connection.execute(
+            f"{query} LIMIT ? OFFSET ?", (page_size, offset)
+        ).fetchall()
+        yield first_rows
+
+        cursor = connection.execute(f"{query} LIMIT -1 OFFSET ?", (offset + page_size,))
+        while True:
+            yield cursor.fetchmany(page_size)
+
+    def _count_pages(
+        self, connection: sqlite3.Connection, count_query: str, page_size: int
+    ) -> tuple[int | None, bool]:
+        cap = self._max_counted_pages * page_size
+        count = connection.execute(count_query, (cap,)).fetchone()[0]
+        if count >= cap:
+            return None, True
+        return -(-count // page_size), False
+
+    def _expire_stale_sessions(self) -> None:
+        now = self._clock()
+        expired = [
+            handle
+            for handle, session in self._sessions.items()
+            if now - session.last_access > _SESSION_TIMEOUT_SECONDS
+        ]
+        for handle in expired:
+            self._sessions.pop(handle).rows_generator.close()  # type: ignore[attr-defined]
 
     def get_book_details(self, ids: list[str]) -> BookDetailsResult:
         deduped_ids, valid_ids = self._partition_ids(ids)
