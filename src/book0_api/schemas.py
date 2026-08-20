@@ -5,6 +5,9 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    PagedAuthorsResult,
+    PagedBooksResult,
+    PagedPublishersResult,
     Publisher,
     Series,
     SeriesItem,
@@ -114,3 +117,59 @@ class BookDetailsResultOut(BaseModel):
 
 class BookIdsIn(BaseModel):
     ids: list[str]
+
+
+class PagedBooksOut(BaseModel):
+    items: list[BookOut]
+    page: int
+    page_size: int
+    total_pages: int | None
+    has_more_than_shown: bool
+
+    @classmethod
+    def from_paged_result(cls, result: PagedBooksResult) -> "PagedBooksOut":
+        return cls(
+            items=[BookOut.from_book(book) for book in result.items],
+            page=result.page,
+            page_size=result.page_size,
+            total_pages=result.total_pages,
+            has_more_than_shown=result.has_more_than_shown,
+        )
+
+
+class PagedAuthorsOut(BaseModel):
+    items: list[AuthorOut]
+    page: int
+    page_size: int
+    total_pages: int | None
+    has_more_than_shown: bool
+
+    @classmethod
+    def from_paged_result(cls, result: PagedAuthorsResult) -> "PagedAuthorsOut":
+        return cls(
+            items=[AuthorOut.from_author(author) for author in result.items],
+            page=result.page,
+            page_size=result.page_size,
+            total_pages=result.total_pages,
+            has_more_than_shown=result.has_more_than_shown,
+        )
+
+
+class PagedPublishersOut(BaseModel):
+    items: list[PublisherOut]
+    page: int
+    page_size: int
+    total_pages: int | None
+    has_more_than_shown: bool
+
+    @classmethod
+    def from_paged_result(cls, result: PagedPublishersResult) -> "PagedPublishersOut":
+        return cls(
+            items=[
+                PublisherOut.from_publisher(publisher) for publisher in result.items
+            ],
+            page=result.page,
+            page_size=result.page_size,
+            total_pages=result.total_pages,
+            has_more_than_shown=result.has_more_than_shown,
+        )
