@@ -71,3 +71,24 @@ def test_load_libraries_raises_on_malformed_toml(tmp_path: Path):
 
     with pytest.raises(tomllib.TOMLDecodeError):
         load_libraries(config_path)
+
+
+def test_load_libraries_returns_none_default_page_size_when_absent(tmp_path: Path):
+    config_path = tmp_path / "libraries.toml"
+    config_path.write_text('[libraries]\nfiction = "/path/to/fiction/metadata.db"\n')
+
+    config = load_libraries(config_path)
+
+    assert config.default_page_size is None
+
+
+def test_load_libraries_reads_default_page_size_when_present(tmp_path: Path):
+    config_path = tmp_path / "libraries.toml"
+    config_path.write_text(
+        "default-page-size = 25\n\n"
+        '[libraries]\nfiction = "/path/to/fiction/metadata.db"\n'
+    )
+
+    config = load_libraries(config_path)
+
+    assert config.default_page_size == 25
