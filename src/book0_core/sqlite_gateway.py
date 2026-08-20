@@ -267,11 +267,14 @@ class SqliteLibraryGateway:
         connection: sqlite3.Connection, query: str, page_size: int, start_page: int
     ) -> Iterator[list[tuple[object, ...]]]:
         # First page: one bounded LIMIT/OFFSET query, seeked directly to start_page -
-        # no more expensive than today's unpaginated query, just bounded. Every
-        # subsequent page this same generator yields (i.e. reused via a handle) then
-        # pulls from one already-open, unbounded-from-here cursor via fetchmany - no
-        # new SELECT per continued page. The cursor is opened lazily (only once the
-        # caller actually continues past the first page), not on every fresh fetch.
+        # no more expensive than today's unpaginated query, just bounded. The first
+        # continuation (i.e. the caller reusing this generator's handle for page
+        # start_page + 1) costs one more query: opening the live, unbounded-from-here
+        # cursor via LIMIT -1 OFFSET ?. That cursor is opened lazily - only once the
+        # caller actually continues past the first page, not on every fresh fetch.
+        # Every continuation after that (second-and-later reuse of the same handle)
+        # is then truly free: it pulls the next slice straight off that already-open
+        # cursor via fetchmany, with no new SELECT at all.
         offset = (start_page - 1) * page_size
         first_rows = connection.execute(
             f"{query} LIMIT ? OFFSET ?", (page_size, offset)

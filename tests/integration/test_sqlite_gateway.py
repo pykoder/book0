@@ -474,6 +474,24 @@ def test_list_books_page_falls_back_when_handle_is_from_a_different_page_size(
     assert [book.title for book in result.items] == ["Book 04", "Book 05", "Book 06"]
 
 
+def test_list_authors_page_falls_back_when_handle_is_from_a_different_resource(
+    paginated_calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(paginated_calibre_metadata_db)
+    books_handle = gateway.list_books_page(1, 2)
+
+    # A handle minted by list_books_page's session ("books", page_size=2) handed to
+    # list_authors_page ("authors", page_size=3) must not be honored - resource
+    # mismatch means a fresh fetch, not authors read off the books session/cursor.
+    result = gateway.list_authors_page(2, 3, handle=books_handle.handle)
+
+    assert [author.name for author in result.items] == [
+        "Author 04",
+        "Author 05",
+        "Author 06",
+    ]
+
+
 def test_list_books_page_falls_back_when_handle_is_unknown(
     paginated_calibre_metadata_db: Path,
 ):
