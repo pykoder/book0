@@ -49,20 +49,24 @@ Before any change, fix, or addition, always:
    `CLAUDE.md`.
 
 ### New feature
-1. Check whether the feature fits `book0_core` (new domain behavior, new gateway method - if
+1. Work on a dedicated branch, never directly on `main` - create one before writing any code
+   (`git checkout -b <descriptive-name>`), implement and test on it, then open a pull request
+   for the feature instead of committing straight to `main`. Debug and maintenance/evolution
+   work is not covered by this - only new-feature work requires the branch + PR.
+2. Check whether the feature fits `book0_core` (new domain behavior, new gateway method - if
    so, **both** `SqliteLibraryGateway` and `HttpLibraryGateway` need it, plus the
    `book0_api` route that serves it), `book0_presentation` (new output shape used by both
    CLIs), or one CLI specifically (a flag/behavior unique to direct or remote access).
-2. Design against the layering in `architecture.md`: both CLIs call into `book0_core`
+3. Design against the layering in `architecture.md`: both CLIs call into `book0_core`
    through the `LibraryGateway` Protocol; `book0_api` calls `book0_core` directly and
    returns JSON. Never let a CLI open a `sqlite3.Connection` or write SQL directly, and never
    let `book0_api` import a CLI package or `book0_presentation`.
-3. Write the code and its tests in parallel, not the tests "afterwards" - see the root
+4. Write the code and its tests in parallel, not the tests "afterwards" - see the root
    `CLAUDE.md`'s TDD expectation.
-4. Check for duplication with neighboring features (DRY) before creating a new module/helper
+5. Check for duplication with neighboring features (DRY) before creating a new module/helper
    - except the deliberate non-sharing between the two CLIs' `main.py` (see
      `architecture.md`), which is not duplication to fix.
-5. A change to `book0_core`'s domain query/output (fields on `Book`, new error type) must be
+6. A change to `book0_core`'s domain query/output (fields on `Book`, new error type) must be
    reflected in **both** gateway implementations' tests, `book0_api`'s error-mapping table,
    and both CLIs' rendering - not just the one you happened to be testing manually.
 
@@ -83,3 +87,5 @@ Before any change, fix, or addition, always:
       `book0_cli` and `book0_api`; if the `LibraryGateway` Protocol changed, check both
       `SqliteLibraryGateway` and `HttpLibraryGateway`.
 - [ ] Every ambiguity or gap with the existing code reported explicitly to the user.
+- [ ] New-feature work happened on a dedicated branch with a pull request opened, not
+      committed directly to `main`.
