@@ -490,3 +490,127 @@ def test_get_book_cover_returns_500_when_configured_path_is_not_a_calibre_librar
 
     assert response.status_code == 500
     assert response.json()["error"] == "NotACalibreLibraryError"
+
+
+def test_list_books_returns_a_page_when_page_size_is_given(
+    paginated_calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": paginated_calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books", params={"tag": "fiction", "page": 2, "page_size": 2}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["title"] for item in body["items"]] == ["Book 03", "Book 04"]
+    assert body["page"] == 2
+    assert body["page_size"] == 2
+    assert body["total_pages"] == 4
+    assert body["has_more_than_shown"] is False
+
+
+def test_list_books_is_unpaginated_when_page_size_is_omitted(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)  # unchanged shape - not a paged envelope
+
+
+def test_list_books_server_default_page_size_caps_a_larger_client_request(
+    paginated_calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": paginated_calibre_metadata_db}, default_page_size=2)
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books", params={"tag": "fiction", "page_size": 10}
+    )
+
+    body = response.json()
+    assert body["page_size"] == 2  # server cap wins
+    assert len(body["items"]) == 2
+
+
+def test_list_books_server_default_page_size_forces_pagination_when_client_omits_it(
+    paginated_calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": paginated_calibre_metadata_db}, default_page_size=3)
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction"})
+
+    body = response.json()
+    assert body["page"] == 1
+    assert body["page_size"] == 3
+    assert len(body["items"]) == 3
+
+
+def test_list_authors_returns_a_page_when_page_size_is_given(
+    paginated_calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": paginated_calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/authors", params={"tag": "fiction", "page": 1, "page_size": 3}
+    )
+
+    body = response.json()
+    assert [item["name"] for item in body["items"]] == [
+        "Author 01",
+        "Author 02",
+        "Author 03",
+    ]
+    assert body["total_pages"] == 3
+
+
+def test_list_publishers_returns_a_page_when_page_size_is_given(
+    paginated_calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": paginated_calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/publishers", params={"tag": "fiction", "page": 1, "page_size": 3}
+    )
+
+    body = response.json()
+    assert [item["name"] for item in body["items"]] == [
+        "Publisher 01",
+        "Publisher 02",
+        "Publisher 03",
+    ]
+    assert body["total_pages"] == 3
+
+
+def test_list_books_normalizes_a_non_positive_page_to_one(
+    paginated_calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": paginated_calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books", params={"tag": "fiction", "page": 0, "page_size": 2}
+    )
+
+    body = response.json()
+    assert body["page"] == 1
+    assert [item["title"] for item in body["items"]] == ["Book 01", "Book 02"]
+
+
+def test_list_books_treats_a_non_positive_page_size_as_unpaginated(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction", "page_size": 0})
+
+    assert isinstance(response.json(), list)

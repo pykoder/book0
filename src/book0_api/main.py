@@ -8,6 +8,9 @@ from book0_api.schemas import (
     BookDetailsResultOut,
     BookIdsIn,
     BookOut,
+    PagedAuthorsOut,
+    PagedBooksOut,
+    PagedPublishersOut,
     PublisherOut,
 )
 from book0_core.errors import (
@@ -28,7 +31,11 @@ def _cover_not_found(id: str) -> JSONResponse:
     )
 
 
-def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> FastAPI:
+def create_app(
+    libraries: dict[str, Path],
+    default_tag: str | None = None,
+    default_page_size: int | None = None,
+) -> FastAPI:
     app = FastAPI()
 
     def _resolve_db_path(tag: str | None) -> Path:
@@ -42,8 +49,28 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
             raise TagRequiredError(f"Unknown library tag: {resolved_tag!r}")
         return db_path
 
+    def _resolve_page_size(page_size: int | None) -> int | None:
+        effective: int | None
+        if default_page_size is not None:
+            effective = (
+                min(page_size, default_page_size)
+                if page_size is not None
+                else default_page_size
+            )
+        else:
+            effective = page_size
+        return effective if effective is not None and effective > 0 else None
+
+    def _resolve_page(page: int | None) -> int:
+        resolved = page if page is not None else 1
+        return resolved if resolved > 0 else 1
+
     @app.get("/libraries/books", response_model=None)
-    def list_books(tag: str | None = None) -> list[BookOut] | JSONResponse:
+    def list_books(
+        tag: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> list[BookOut] | PagedBooksOut | JSONResponse:
         try:
             db_path = _resolve_db_path(tag)
         except TagRequiredError as error:
@@ -53,8 +80,14 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
             )
 
         gateway = SqliteLibraryGateway(db_path)
+        effective_page_size = _resolve_page_size(page_size)
         try:
-            books = gateway.list_books()
+            if effective_page_size is None:
+                books = gateway.list_books()
+            else:
+                paged_books = gateway.list_books_page(
+                    _resolve_page(page), effective_page_size
+                )
         except LibraryNotFoundError as error:
             return JSONResponse(
                 status_code=404,
@@ -66,10 +99,16 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
                 content={"error": "NotACalibreLibraryError", "detail": str(error)},
             )
 
-        return [BookOut.from_book(book) for book in books]
+        if effective_page_size is None:
+            return [BookOut.from_book(book) for book in books]
+        return PagedBooksOut.from_paged_result(paged_books)
 
     @app.get("/libraries/authors", response_model=None)
-    def list_authors(tag: str | None = None) -> list[AuthorOut] | JSONResponse:
+    def list_authors(
+        tag: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> list[AuthorOut] | PagedAuthorsOut | JSONResponse:
         try:
             db_path = _resolve_db_path(tag)
         except TagRequiredError as error:
@@ -79,8 +118,14 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
             )
 
         gateway = SqliteLibraryGateway(db_path)
+        effective_page_size = _resolve_page_size(page_size)
         try:
-            authors = gateway.list_authors()
+            if effective_page_size is None:
+                authors = gateway.list_authors()
+            else:
+                paged_authors = gateway.list_authors_page(
+                    _resolve_page(page), effective_page_size
+                )
         except LibraryNotFoundError as error:
             return JSONResponse(
                 status_code=404,
@@ -92,10 +137,16 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
                 content={"error": "NotACalibreLibraryError", "detail": str(error)},
             )
 
-        return [AuthorOut.from_author(author) for author in authors]
+        if effective_page_size is None:
+            return [AuthorOut.from_author(author) for author in authors]
+        return PagedAuthorsOut.from_paged_result(paged_authors)
 
     @app.get("/libraries/publishers", response_model=None)
-    def list_publishers(tag: str | None = None) -> list[PublisherOut] | JSONResponse:
+    def list_publishers(
+        tag: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> list[PublisherOut] | PagedPublishersOut | JSONResponse:
         try:
             db_path = _resolve_db_path(tag)
         except TagRequiredError as error:
@@ -105,8 +156,14 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
             )
 
         gateway = SqliteLibraryGateway(db_path)
+        effective_page_size = _resolve_page_size(page_size)
         try:
-            publishers = gateway.list_publishers()
+            if effective_page_size is None:
+                publishers = gateway.list_publishers()
+            else:
+                paged_publishers = gateway.list_publishers_page(
+                    _resolve_page(page), effective_page_size
+                )
         except LibraryNotFoundError as error:
             return JSONResponse(
                 status_code=404,
@@ -118,7 +175,9 @@ def create_app(libraries: dict[str, Path], default_tag: str | None = None) -> Fa
                 content={"error": "NotACalibreLibraryError", "detail": str(error)},
             )
 
-        return [PublisherOut.from_publisher(publisher) for publisher in publishers]
+        if effective_page_size is None:
+            return [PublisherOut.from_publisher(publisher) for publisher in publishers]
+        return PagedPublishersOut.from_paged_result(paged_publishers)
 
     @app.post("/libraries/books/detail", response_model=None)
     def get_book_details(
