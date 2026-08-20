@@ -386,3 +386,17 @@ def test_non_calibre_sqlite_file_raises_not_a_calibre_library_error_for_book_det
 
     with pytest.raises(NotACalibreLibraryError):
         gateway.get_book_details(["1"])
+
+
+def test_list_books_then_list_authors_reuse_the_same_connection(
+    calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    gateway.list_books()
+    first_connection = gateway._connection
+    gateway.list_authors()
+    second_connection = gateway._connection
+
+    assert first_connection is not None
+    assert first_connection is second_connection

@@ -80,68 +80,48 @@ class SqliteLibraryGateway:
         self._db_path = (
             library_path / "metadata.db" if library_path.is_dir() else library_path
         )
+        self._connection: sqlite3.Connection | None = None
+
+    def _connect(self) -> sqlite3.Connection:
+        if not self._db_path.exists():
+            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
+        if self._connection is None:
+            self._connection = sqlite3.connect(
+                f"file:{self._db_path}?mode=ro", uri=True
+            )
+            self._check_is_calibre_library(self._connection)
+        return self._connection
 
     def list_books(self) -> list[Book]:
-        if not self._db_path.exists():
-            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
+        connection = self._connect()
+        rows = connection.execute(_LIST_BOOKS_QUERY).fetchall()
+        return [self._row_to_book(row) for row in rows]
 
-        connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        try:
-            self._check_is_calibre_library(connection)
-            rows = connection.execute(_LIST_BOOKS_QUERY).fetchall()
-        finally:
-            connection.close()
-
-        return [
-            Book(
-                id=str(row[0]),
-                title=row[1],
-                authors=tuple(row[2].split(", ")) if row[2] else (),
-                pubdate=self._normalize_pubdate(row[3]),
-            )
-            for row in rows
-        ]
+    def _row_to_book(self, row: tuple[object, ...]) -> Book:
+        return Book(
+            id=str(row[0]),
+            title=row[1],  # type: ignore[arg-type]
+            authors=tuple(row[2].split(", ")) if row[2] else (),  # type: ignore[attr-defined]
+            pubdate=self._normalize_pubdate(row[3]),  # type: ignore[arg-type]
+        )
 
     def list_authors(self) -> list[Author]:
-        if not self._db_path.exists():
-            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
-
-        connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        try:
-            self._check_is_calibre_library(connection)
-            rows = connection.execute(_LIST_AUTHORS_QUERY).fetchall()
-        finally:
-            connection.close()
-
+        connection = self._connect()
+        rows = connection.execute(_LIST_AUTHORS_QUERY).fetchall()
         return [Author(id=str(row[0]), name=row[1]) for row in rows]
 
     def list_publishers(self) -> list[Publisher]:
-        if not self._db_path.exists():
-            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
-
-        connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        try:
-            self._check_is_calibre_library(connection)
-            rows = connection.execute(_LIST_PUBLISHERS_QUERY).fetchall()
-        finally:
-            connection.close()
-
+        connection = self._connect()
+        rows = connection.execute(_LIST_PUBLISHERS_QUERY).fetchall()
         return [Publisher(id=str(row[0]), name=row[1]) for row in rows]
 
     def get_book_details(self, ids: list[str]) -> BookDetailsResult:
-        if not self._db_path.exists():
-            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
-
         deduped_ids, valid_ids = self._partition_ids(ids)
 
-        connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        try:
-            self._check_is_calibre_library(connection)
-            placeholders = ", ".join("?" for _ in valid_ids)
-            query = _GET_BOOK_DETAILS_QUERY_TEMPLATE.format(placeholders=placeholders)
-            rows = connection.execute(query, valid_ids).fetchall()
-        finally:
-            connection.close()
+        connection = self._connect()
+        placeholders = ", ".join("?" for _ in valid_ids)
+        query = _GET_BOOK_DETAILS_QUERY_TEMPLATE.format(placeholders=placeholders)
+        rows = connection.execute(query, valid_ids).fetchall()
 
         books = []
         found_ids: set[str] = set()
