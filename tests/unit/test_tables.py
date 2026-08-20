@@ -13,6 +13,7 @@ from book0_presentation.tables import (
     render_author_table,
     render_book_details_table,
     render_book_table,
+    render_page_footer,
     render_publisher_table,
 )
 
@@ -251,3 +252,11 @@ def test_format_missing_ids_message_returns_none_when_empty():
 
 def test_format_missing_ids_message_joins_ids():
     assert format_missing_ids_message(("1", "2")) == "Missing ids: 1, 2"
+
+
+def test_render_page_footer_with_a_known_total():
+    assert render_page_footer(3, 12) == "Page 3 of 12"
+
+
+def test_render_page_footer_with_an_unknown_total():
+    assert render_page_footer(3, None) == "Page 3 of many"
