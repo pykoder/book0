@@ -24,3 +24,9 @@ work = "${WORK_LIBRARY_PATH}"
 # their behalf; without it, an omitted --tag is rejected with a 400
 # TagRequiredError.
 # default-library = "fiction"
+
+# Optional: a server-side ceiling on page_size for the three list routes (books,
+# authors, publishers) when pagination is requested via ?page_size=... - also forces
+# pagination even when a request omits page_size entirely, protecting the server from
+# an unbounded query.
+# default-page-size = 100
