@@ -70,6 +70,16 @@ Before any change, fix, or addition, always:
    reflected in **both** gateway implementations' tests, `book0_api`'s error-mapping table,
    and both CLIs' rendering - not just the one you happened to be testing manually.
 
+### Dispatching review/audit subagents
+When dispatching a subagent whose job is to inspect or evaluate rather than change code
+(code review before merge, an audit, "just look and report"), always launch it with
+`isolation: "worktree"`. A prompt instruction like "read-only, do not mutate the working
+tree" is not enforced by anything - a general-purpose subagent has unrestricted tool access
+and may ignore it. Worktree isolation means any edit the subagent makes anyway lands in an
+isolated copy, never in the real checkout. Confirmed necessary in this project on
+2026-08-21: a code-review subagent given explicit read-only instructions applied its own
+suggested fixes directly to the working tree as uncommitted changes.
+
 ## End-of-task checklist
 
 - [ ] The code follows the style and patterns already present in the touched package.
@@ -89,3 +99,5 @@ Before any change, fix, or addition, always:
 - [ ] Every ambiguity or gap with the existing code reported explicitly to the user.
 - [ ] New-feature work happened on a dedicated branch with a pull request opened, not
       committed directly to `main`.
+- [ ] Any review/audit subagent was dispatched with `isolation: "worktree"`, not just a
+      read-only prompt instruction.
