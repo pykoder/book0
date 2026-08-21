@@ -2,7 +2,7 @@ import re
 import secrets
 import sqlite3
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -94,7 +94,7 @@ class _PaginationSession:
     resource: str
     page_size: int
     expected_next_page: int
-    rows_generator: Iterator[list[tuple[object, ...]]]
+    rows_generator: Generator[list[tuple[object, ...]], None, None]
     last_access: float
 
 
@@ -216,7 +216,7 @@ class SqliteLibraryGateway:
     def close_pagination(self, handle: str) -> None:
         session = self._sessions.pop(handle, None)
         if session is not None:
-            session.rows_generator.close()  # type: ignore[attr-defined]
+            session.rows_generator.close()
 
     def _paged_rows(
         self,
@@ -238,6 +238,7 @@ class SqliteLibraryGateway:
             and session.page_size == page_size
             and session.expected_next_page == page
         ):
+            assert handle is not None  # the session lookup above guarantees this
             rows = next(session.rows_generator)
             session.expected_next_page += 1
             session.last_access = self._clock()
@@ -259,13 +260,13 @@ class SqliteLibraryGateway:
         if total_pages is not None and page >= total_pages:
             out_handle = None
         if out_handle is None:
-            self.close_pagination(active_handle)  # type: ignore[arg-type]
+            self.close_pagination(active_handle)
         return rows, out_handle, total_pages, has_more
 
     @staticmethod
     def _paged_rows_generator(
         connection: sqlite3.Connection, query: str, page_size: int, start_page: int
-    ) -> Iterator[list[tuple[object, ...]]]:
+    ) -> Generator[list[tuple[object, ...]], None, None]:
         # First page: one bounded LIMIT/OFFSET query, seeked directly to start_page -
         # no more expensive than today's unpaginated query, just bounded. The first
         # continuation (i.e. the caller reusing this generator's handle for page
@@ -282,8 +283,15 @@ class SqliteLibraryGateway:
         yield first_rows
 
         cursor = connection.execute(f"{query} LIMIT -1 OFFSET ?", (offset + page_size,))
-        while True:
-            yield cursor.fetchmany(page_size)
+        try:
+            while True:
+                yield cursor.fetchmany(page_size)
+        finally:
+            # Runs both when the generator is explicitly .close()'d (close_pagination,
+            # session expiry) and if it's simply garbage-collected without being
+            # closed - either way, don't leave a live cursor open on the shared
+            # connection past the session's lifetime.
+            cursor.close()
 
     def _count_pages(
         self, connection: sqlite3.Connection, count_query: str, page_size: int
@@ -302,7 +310,7 @@ class SqliteLibraryGateway:
             if now - session.last_access > _SESSION_TIMEOUT_SECONDS
         ]
         for handle in expired:
-            self._sessions.pop(handle).rows_generator.close()  # type: ignore[attr-defined]
+            self._sessions.pop(handle).rows_generator.close()
 
     def get_book_details(self, ids: list[str]) -> BookDetailsResult:
         deduped_ids, valid_ids = self._partition_ids(ids)
