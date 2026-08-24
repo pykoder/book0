@@ -5,6 +5,9 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    PagedAuthorsResult,
+    PagedBooksResult,
+    PagedPublishersResult,
     Publisher,
     Series,
     SeriesItem,
@@ -168,3 +171,76 @@ def test_book_details_result_is_frozen():
 
     with pytest.raises(AttributeError):
         result.missing_ids = ("1",)
+
+
+def test_paged_books_result_holds_items_and_page_metadata():
+    result = PagedBooksResult(
+        items=(Book(id="1", title="Dune", authors=("Frank Herbert",), pubdate=None),),
+        page=1,
+        page_size=20,
+        total_pages=3,
+        has_more_than_shown=False,
+        handle="abc123",
+    )
+
+    assert result.page == 1
+    assert result.page_size == 20
+    assert result.total_pages == 3
+    assert result.has_more_than_shown is False
+    assert result.handle == "abc123"
+
+
+def test_paged_books_result_accepts_none_total_pages_and_none_handle():
+    result = PagedBooksResult(
+        items=(),
+        page=5,
+        page_size=20,
+        total_pages=None,
+        has_more_than_shown=True,
+        handle=None,
+    )
+
+    assert result.total_pages is None
+    assert result.handle is None
+
+
+def test_paged_books_result_is_frozen():
+    result = PagedBooksResult(
+        items=(),
+        page=1,
+        page_size=20,
+        total_pages=0,
+        has_more_than_shown=False,
+        handle=None,
+    )
+
+    with pytest.raises(AttributeError):
+        result.page = 2
+
+
+def test_paged_authors_result_holds_items_and_page_metadata():
+    result = PagedAuthorsResult(
+        items=(Author(id="1", name="Frank Herbert"),),
+        page=1,
+        page_size=20,
+        total_pages=1,
+        has_more_than_shown=False,
+        handle=None,
+    )
+
+    assert result.items == (Author(id="1", name="Frank Herbert"),)
+    assert result.total_pages == 1
+
+
+def test_paged_publishers_result_holds_items_and_page_metadata():
+    result = PagedPublishersResult(
+        items=(Publisher(id="1", name="Ace Books"),),
+        page=1,
+        page_size=20,
+        total_pages=1,
+        has_more_than_shown=False,
+        handle=None,
+    )
+
+    assert result.items == (Publisher(id="1", name="Ace Books"),)
+    assert result.total_pages == 1
