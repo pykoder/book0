@@ -222,6 +222,9 @@ def test_sqlite_gateway_satisfies_the_library_gateway_protocol(
     gateway: LibraryGateway = SqliteLibraryGateway(calibre_metadata_db)
 
     assert gateway.list_publishers() == CALIBRE_LIBRARY_PUBLISHERS
+    paged = gateway.list_books_page(1, 10)
+    assert paged.page == 1
+    gateway.close_pagination("unused-handle")
 
 
 def test_gateway_reuses_the_same_connection_across_multiple_method_calls(
@@ -628,6 +631,43 @@ def test_list_authors_page_last_page_has_no_handle(many_books_db: Path):
     result = gateway.list_authors_page(4, 2)
 
     assert [author.name for author in result.items] == ["Author 7"]
+    assert result.handle is None
+
+
+def test_list_publishers_page_returns_the_requested_page_in_name_order(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_publishers_page(1, 2)
+
+    assert [publisher.name for publisher in result.items] == [
+        "Publisher 1",
+        "Publisher 2",
+    ]
+    assert result.total_pages == 4
+
+
+def test_list_publishers_page_reuses_the_session_for_the_immediate_next_page(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.list_publishers_page(1, 2)
+    second = gateway.list_publishers_page(2, 2, handle=first.handle)
+
+    assert [publisher.name for publisher in second.items] == [
+        "Publisher 3",
+        "Publisher 4",
+    ]
+
+
+def test_list_publishers_page_last_page_has_no_handle(many_books_db: Path):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_publishers_page(4, 2)
+
+    assert [publisher.name for publisher in result.items] == ["Publisher 7"]
     assert result.handle is None
 
 
