@@ -534,6 +534,24 @@ def test_run_reports_error_for_invalid_cover_cache_dir_config(
     assert "Invalid book0-remote client config file" in captured.err
 
 
+def test_run_reports_error_for_invalid_page_size_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    (tmp_path / ".book0-client.toml").write_text("not valid toml === \n")
+
+    exit_code = run(["books", "--server", "unused", "--tag", "fiction"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Invalid book0-remote client config file" in captured.err
+
+
 def test_run_paginates_books_when_page_size_flag_is_given(
     many_books_db: Path, capsys: pytest.CaptureFixture[str]
 ):
