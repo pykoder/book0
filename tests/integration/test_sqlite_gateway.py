@@ -223,6 +223,28 @@ def test_sqlite_gateway_satisfies_the_library_gateway_protocol(
     assert gateway.list_publishers() == CALIBRE_LIBRARY_PUBLISHERS
 
 
+def test_gateway_reuses_the_same_connection_across_multiple_method_calls(
+    calibre_metadata_db: Path, monkeypatch: pytest.MonkeyPatch
+):
+    real_connect = sqlite3.connect
+    captured_calls: list[str] = []
+
+    def spying_connect(
+        database: str, *args: object, **kwargs: object
+    ) -> sqlite3.Connection:
+        captured_calls.append(str(database))
+        return real_connect(database, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(sqlite3, "connect", spying_connect)
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    gateway.list_books()
+    gateway.list_authors()
+    gateway.list_publishers()
+
+    assert captured_calls == [f"file:{calibre_metadata_db}?mode=ro"]
+
+
 def test_get_book_details_returns_details_for_a_book_with_everything(
     calibre_metadata_db: Path,
     expected_book_details: tuple,
