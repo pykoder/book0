@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from book0_core import sqlite_gateway
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.gateway import LibraryGateway
 from book0_core.sqlite_gateway import SqliteLibraryGateway
@@ -408,3 +409,180 @@ def test_non_calibre_sqlite_file_raises_not_a_calibre_library_error_for_book_det
 
     with pytest.raises(NotACalibreLibraryError):
         gateway.get_book_details(["1"])
+
+
+def test_list_books_page_returns_the_requested_page_in_title_order(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_books_page(1, 2)
+
+    assert [book.title for book in result.items] == ["Book 1", "Book 2"]
+    assert result.page == 1
+    assert result.page_size == 2
+
+
+def test_list_books_page_cold_jump_to_a_later_page_returns_correct_rows(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_books_page(3, 2)
+
+    assert [book.title for book in result.items] == ["Book 5", "Book 6"]
+
+
+def test_list_books_page_last_page_has_fewer_items_and_no_handle(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_books_page(4, 2)
+
+    assert [book.title for book in result.items] == ["Book 7"]
+    assert result.handle is None
+
+
+def test_list_books_page_reports_exact_total_pages_under_the_cap(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_books_page(1, 2)
+
+    assert result.total_pages == 4
+    assert result.has_more_than_shown is False
+
+
+def test_list_books_page_reports_many_when_count_exceeds_the_cap(
+    many_books_db: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(sqlite_gateway, "_PAGE_COUNT_CAP", 2)
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_books_page(1, 2)
+
+    assert result.total_pages is None
+    assert result.has_more_than_shown is True
+
+
+def test_list_books_page_reports_zero_total_pages_for_an_empty_library(
+    calibre_metadata_db: Path,
+):
+    db_path = calibre_metadata_db.parent / "empty" / "metadata.db"
+    db_path.parent.mkdir()
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL,
+                pubdate TEXT, series_index REAL, path TEXT, has_cover INTEGER);
+            CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL, author INTEGER NOT NULL);
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    gateway = SqliteLibraryGateway(db_path)
+
+    result = gateway.list_books_page(1, 2)
+
+    assert result.items == ()
+    assert result.total_pages == 0
+    assert result.handle is None
+
+
+def test_list_books_page_reuses_the_session_for_the_immediate_next_page(
+    many_books_db: Path,
+):
+    # sqlite3.Connection is a C-extension type - its methods can't be monkeypatched
+    # directly (monkeypatch.setattr(sqlite3.Connection, "execute", ...) raises
+    # TypeError: cannot set 'execute' attribute of immutable type). Use the
+    # connection's own set_trace_callback instead: it receives the SQL text of
+    # every statement actually executed on it, which is exactly what "no new
+    # OFFSET query for the reused page" needs to observe.
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.list_books_page(1, 2)
+    traced_sql: list[str] = []
+    gateway._connect().set_trace_callback(traced_sql.append)
+    second = gateway.list_books_page(2, 2, handle=first.handle)
+
+    assert [book.title for book in second.items] == ["Book 3", "Book 4"]
+    assert not any("OFFSET" in sql for sql in traced_sql)
+
+
+def test_list_books_page_falls_back_to_a_fresh_fetch_outside_the_reusable_range(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.list_books_page(1, 2)
+    # Requesting page 1 again (not the session's next page, 2) must not reuse it.
+    repeated = gateway.list_books_page(1, 2, handle=first.handle)
+
+    assert [book.title for book in repeated.items] == ["Book 1", "Book 2"]
+
+
+def test_list_books_page_falls_back_when_handle_is_unknown(many_books_db: Path):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_books_page(2, 2, handle="not-a-real-handle")
+
+    assert [book.title for book in result.items] == ["Book 3", "Book 4"]
+
+
+def test_list_books_page_falls_back_when_page_size_does_not_match_the_session(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.list_books_page(1, 2)
+    result = gateway.list_books_page(2, 3, handle=first.handle)
+
+    assert [book.title for book in result.items] == ["Book 4", "Book 5", "Book 6"]
+
+
+# (The "handle belongs to a different resource" fallback case needs a second real
+# resource type to be meaningful - list_authors_page doesn't exist until Task 4, so
+# that test lives there instead, once both methods exist to cross-check against
+# each other.)
+
+
+def test_close_pagination_releases_the_session(many_books_db: Path):
+    gateway = SqliteLibraryGateway(many_books_db)
+    first = gateway.list_books_page(1, 2)
+    assert first.handle is not None
+
+    gateway.close_pagination(first.handle)
+    second = gateway.list_books_page(2, 2, handle=first.handle)
+
+    # A fresh fetch for page 2 gets its own new handle, distinct from the closed one.
+    assert second.handle != first.handle
+    assert [book.title for book in second.items] == ["Book 3", "Book 4"]
+
+
+def test_close_pagination_is_silent_and_idempotent_for_an_unknown_handle(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    gateway.close_pagination("never-issued")
+    gateway.close_pagination("never-issued")  # idempotent, no exception
+
+
+def test_list_books_page_expires_a_session_after_the_timeout(
+    many_books_db: Path, monkeypatch: pytest.MonkeyPatch
+):
+    fake_now = [1000.0]
+    monkeypatch.setattr(SqliteLibraryGateway, "_now", lambda self: fake_now[0])
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.list_books_page(1, 2)
+    fake_now[0] += 61
+    result = gateway.list_books_page(2, 2, handle=first.handle)
+
+    assert [book.title for book in result.items] == ["Book 3", "Book 4"]
