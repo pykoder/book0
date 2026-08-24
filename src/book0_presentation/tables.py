@@ -119,3 +119,8 @@ def format_missing_ids_message(missing_ids: tuple[str, ...]) -> str | None:
     if not missing_ids:
         return None
     return f"Missing ids: {', '.join(missing_ids)}"
+
+
+def format_page_footer(page: int, total_pages: int | None) -> str:
+    total = str(total_pages) if total_pages is not None else "many"
+    return f"Page {page} of {total}"
