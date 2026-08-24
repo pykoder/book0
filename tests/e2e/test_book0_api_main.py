@@ -443,9 +443,7 @@ def test_get_book_cover_returns_400_for_an_unconfigured_tag(calibre_metadata_db:
     app = create_app({"fiction": calibre_metadata_db})
     client = TestClient(app)
 
-    response = client.get(
-        "/libraries/books/1/cover", params={"tag": "does-not-exist"}
-    )
+    response = client.get("/libraries/books/1/cover", params={"tag": "does-not-exist"})
 
     assert response.status_code == 400
     assert response.json()["error"] == "TagRequiredError"
@@ -490,3 +488,155 @@ def test_get_book_cover_returns_500_when_configured_path_is_not_a_calibre_librar
 
     assert response.status_code == 500
     assert response.json()["error"] == "NotACalibreLibraryError"
+
+
+def test_list_books_returns_a_paginated_response_when_page_size_is_given(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books", params={"tag": "fiction", "page": 1, "page_size": 2}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["title"] for item in body["items"]] == ["Book 1", "Book 2"]
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+    assert body["total_pages"] == 4
+    assert body["has_more_than_shown"] is False
+
+
+def test_list_books_omitting_page_and_page_size_stays_unpaginated_with_no_server_default(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+    assert len(response.json()) == 7
+
+
+def test_list_books_server_default_page_size_forces_pagination(many_books_db: Path):
+    app = create_app({"fiction": many_books_db}, default_page_size=2)
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+    assert [item["title"] for item in body["items"]] == ["Book 1", "Book 2"]
+
+
+def test_list_books_server_default_page_size_caps_a_larger_client_request(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db}, default_page_size=2)
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books", params={"tag": "fiction", "page_size": 100}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["page_size"] == 2
+
+
+def test_list_books_client_page_size_smaller_than_server_default_is_honored(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db}, default_page_size=5)
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction", "page_size": 2})
+
+    assert response.status_code == 200
+    assert response.json()["page_size"] == 2
+
+
+def test_list_books_non_positive_page_is_normalized_to_one(many_books_db: Path):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books", params={"tag": "fiction", "page": 0, "page_size": 2}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["page"] == 1
+
+
+def test_list_books_non_positive_page_size_is_normalized_to_unpaginated(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction", "page_size": 0})
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_list_books_non_numeric_page_returns_422(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction", "page": "abc"})
+
+    assert response.status_code == 422
+
+
+def test_list_books_returns_400_for_an_unknown_tag_even_when_page_size_is_given(
+    many_books_db: Path,
+):
+    # Unknown-tag handling (TagRequiredError -> 400) happens in _resolve_db_path,
+    # before pagination resolution runs at all - this test just confirms the two
+    # features don't interact / pagination params don't bypass tag validation.
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books",
+        params={"tag": "does-not-exist", "page": 1, "page_size": 2},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "TagRequiredError"
+
+
+def test_list_authors_returns_a_paginated_response_when_page_size_is_given(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/authors", params={"tag": "fiction", "page": 1, "page_size": 2}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["name"] for item in body["items"]] == ["Author 1", "Author 2"]
+
+
+def test_list_publishers_returns_a_paginated_response_when_page_size_is_given(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/publishers", params={"tag": "fiction", "page": 1, "page_size": 2}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["name"] for item in body["items"]] == ["Publisher 1", "Publisher 2"]
