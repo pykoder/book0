@@ -108,7 +108,12 @@ def test_paged_books_result_accepts_none_total_pages_and_none_handle():
 
 def test_paged_books_result_is_frozen():
     result = PagedBooksResult(
-        items=(), page=1, page_size=20, total_pages=0, has_more_than_shown=False, handle=None
+        items=(),
+        page=1,
+        page_size=20,
+        total_pages=0,
+        has_more_than_shown=False,
+        handle=None,
     )
 
     with pytest.raises(AttributeError):
@@ -567,26 +572,23 @@ def test_list_books_page_reports_zero_total_pages_for_an_empty_library(
 
 
 def test_list_books_page_reuses_the_session_for_the_immediate_next_page(
-    many_books_db: Path, monkeypatch: pytest.MonkeyPatch
+    many_books_db: Path,
 ):
-    real_execute = sqlite3.Connection.execute
-    executed_queries: list[str] = []
-
-    def spying_execute(
-        self: sqlite3.Connection, sql: str, *args: object, **kwargs: object
-    ) -> sqlite3.Cursor:
-        executed_queries.append(sql)
-        return real_execute(self, sql, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(sqlite3.Connection, "execute", spying_execute)
+    # sqlite3.Connection is a C-extension type - its methods can't be monkeypatched
+    # directly (monkeypatch.setattr(sqlite3.Connection, "execute", ...) raises
+    # TypeError: cannot set 'execute' attribute of immutable type). Use the
+    # connection's own set_trace_callback instead: it receives the SQL text of
+    # every statement actually executed on it, which is exactly what "no new
+    # OFFSET query for the reused page" needs to observe.
     gateway = SqliteLibraryGateway(many_books_db)
 
     first = gateway.list_books_page(1, 2)
-    executed_queries.clear()
+    traced_sql: list[str] = []
+    gateway._connect().set_trace_callback(traced_sql.append)
     second = gateway.list_books_page(2, 2, handle=first.handle)
 
     assert [book.title for book in second.items] == ["Book 3", "Book 4"]
-    assert not any("OFFSET" in query for query in executed_queries)
+    assert not any("OFFSET" in sql for sql in traced_sql)
 
 
 def test_list_books_page_falls_back_to_a_fresh_fetch_outside_the_reusable_range(
@@ -599,6 +601,18 @@ def test_list_books_page_falls_back_to_a_fresh_fetch_outside_the_reusable_range(
     repeated = gateway.list_books_page(1, 2, handle=first.handle)
 
     assert [book.title for book in repeated.items] == ["Book 1", "Book 2"]
+
+
+def test_list_books_page_closes_the_superseded_session_on_a_same_stream_fallback(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.list_books_page(1, 2)
+    assert first.handle in gateway._sessions
+    gateway.list_books_page(1, 2, handle=first.handle)  # repeats page 1, not next
+
+    assert first.handle not in gateway._sessions
 
 
 def test_list_books_page_falls_back_when_handle_is_unknown(many_books_db: Path):
@@ -620,15 +634,10 @@ def test_list_books_page_falls_back_when_page_size_does_not_match_the_session(
     assert [book.title for book in result.items] == ["Book 4", "Book 5", "Book 6"]
 
 
-def test_list_books_page_falls_back_when_handle_belongs_to_a_different_resource(
-    many_books_db: Path,
-):
-    gateway = SqliteLibraryGateway(many_books_db)
-
-    authors_first = gateway.list_authors_page(1, 2)
-    result = gateway.list_books_page(2, 2, handle=authors_first.handle)
-
-    assert [book.title for book in result.items] == ["Book 3", "Book 4"]
+# (The "handle belongs to a different resource" fallback case needs a second real
+# resource type to be meaningful - list_authors_page doesn't exist until Task 4, so
+# that test lives there instead, once both methods exist to cross-check against
+# each other.)
 
 
 def test_close_pagination_releases_the_session(many_books_db: Path):
@@ -716,107 +725,127 @@ Add these methods to `SqliteLibraryGateway` (anywhere after `_connect`, e.g. rig
 `get_book_details`):
 
 ```python
-    def list_books_page(
-        self, page: int, page_size: int, handle: str | None = None
-    ) -> PagedBooksResult:
-        connection = self._connect()
-        rows, result_handle = self._fetch_page(
-            connection, "books", page, page_size, handle, _LIST_BOOKS_QUERY_FROM_OFFSET
+def list_books_page(
+    self, page: int, page_size: int, handle: str | None = None
+) -> PagedBooksResult:
+    connection = self._connect()
+    rows, result_handle = self._fetch_page(
+        connection, "books", page, page_size, handle, _LIST_BOOKS_QUERY_FROM_OFFSET
+    )
+    total_pages, has_more = self._bounded_total_pages(
+        connection, _LIST_BOOKS_COUNT_QUERY, page_size
+    )
+    books = tuple(
+        Book(
+            id=str(row[0]),
+            title=row[1],
+            authors=tuple(row[2].split(", ")) if row[2] else (),
+            pubdate=self._normalize_pubdate(row[3]),
         )
-        total_pages, has_more = self._bounded_total_pages(
-            connection, _LIST_BOOKS_COUNT_QUERY, page_size
-        )
-        books = tuple(
-            Book(
-                id=str(row[0]),
-                title=row[1],
-                authors=tuple(row[2].split(", ")) if row[2] else (),
-                pubdate=self._normalize_pubdate(row[3]),
-            )
-            for row in rows
-        )
-        return PagedBooksResult(
-            items=books,
-            page=page,
-            page_size=page_size,
-            total_pages=total_pages,
-            has_more_than_shown=has_more,
-            handle=result_handle,
-        )
+        for row in rows
+    )
+    return PagedBooksResult(
+        items=books,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        has_more_than_shown=has_more,
+        handle=result_handle,
+    )
 
-    def close_pagination(self, handle: str) -> None:
-        session = self._sessions.pop(handle, None)
-        if session is not None:
-            session.cursor.close()
 
-    def _now(self) -> float:
-        return time.monotonic()
+def close_pagination(self, handle: str) -> None:
+    session = self._sessions.pop(handle, None)
+    if session is not None:
+        session.cursor.close()
 
-    def _prune_expired_sessions(self) -> None:
-        now = self._now()
-        expired = [
-            handle
-            for handle, session in self._sessions.items()
-            if now - session.last_access > _SESSION_TIMEOUT_SECONDS
-        ]
-        for handle in expired:
-            self._sessions.pop(handle).cursor.close()
 
-    def _fetch_page(
-        self,
-        connection: sqlite3.Connection,
-        resource: str,
-        page: int,
-        page_size: int,
-        handle: str | None,
-        query_from_offset: str,
-    ) -> tuple[list[tuple[object, ...]], str | None]:
-        self._prune_expired_sessions()
+def _now(self) -> float:
+    return time.monotonic()
 
-        session = self._sessions.get(handle) if handle is not None else None
-        reusable = (
+
+def _prune_expired_sessions(self) -> None:
+    now = self._now()
+    expired = [
+        handle
+        for handle, session in self._sessions.items()
+        if now - session.last_access > _SESSION_TIMEOUT_SECONDS
+    ]
+    for handle in expired:
+        self._sessions.pop(handle).cursor.close()
+
+
+def _fetch_page(
+    self,
+    connection: sqlite3.Connection,
+    resource: str,
+    page: int,
+    page_size: int,
+    handle: str | None,
+    query_from_offset: str,
+) -> tuple[list[tuple[object, ...]], str | None]:
+    self._prune_expired_sessions()
+
+    session = self._sessions.get(handle) if handle is not None else None
+    reusable = (
+        session is not None
+        and session.resource == resource
+        and session.page_size == page_size
+        and session.next_page == page
+    )
+    if reusable and session is not None and handle is not None:
+        rows = session.cursor.fetchmany(page_size)
+        session.next_page += 1
+        session.last_access = self._now()
+        result_handle: str | None = handle
+    else:
+        # A known handle for the *same* resource/page_size that just isn't the
+        # session's next page (a repeat, a backward jump) is superseded, not
+        # merely unrelated - close it now rather than waiting out the timeout.
+        # A handle that mismatches on resource or page_size might still be a
+        # different, still-wanted session under its own handle - leave it for
+        # the timeout instead of closing it as a side effect of this call.
+        if (
             session is not None
+            and handle is not None
             and session.resource == resource
             and session.page_size == page_size
-            and session.next_page == page
-        )
-        if reusable and session is not None and handle is not None:
-            rows = session.cursor.fetchmany(page_size)
-            session.next_page += 1
-            session.last_access = self._now()
-            result_handle: str | None = handle
-        else:
-            offset = (page - 1) * page_size
-            cursor = connection.execute(query_from_offset, (offset,))
-            rows = cursor.fetchmany(page_size)
-            session = _PaginationSession(
-                resource=resource,
-                page_size=page_size,
-                next_page=page + 1,
-                cursor=cursor,
-                last_access=self._now(),
-            )
-            result_handle = str(uuid.uuid4())
-            self._sessions[result_handle] = session
-
-        if len(rows) < page_size:
-            self._sessions.pop(result_handle, None)
+        ):
+            self._sessions.pop(handle, None)
             session.cursor.close()
-            result_handle = None
 
-        return rows, result_handle
+        offset = (page - 1) * page_size
+        cursor = connection.execute(query_from_offset, (offset,))
+        rows = cursor.fetchmany(page_size)
+        session = _PaginationSession(
+            resource=resource,
+            page_size=page_size,
+            next_page=page + 1,
+            cursor=cursor,
+            last_access=self._now(),
+        )
+        result_handle = str(uuid.uuid4())
+        self._sessions[result_handle] = session
 
-    def _bounded_total_pages(
-        self, connection: sqlite3.Connection, count_query: str, page_size: int
-    ) -> tuple[int | None, bool]:
-        row_cap = _PAGE_COUNT_CAP * page_size + 1
-        count = connection.execute(
-            f"SELECT COUNT(*) FROM ({count_query} LIMIT ?)", (row_cap,)
-        ).fetchone()[0]
-        if count > _PAGE_COUNT_CAP * page_size:
-            return None, True
-        total_pages = -(-count // page_size) if count else 0
-        return total_pages, False
+    if len(rows) < page_size:
+        self._sessions.pop(result_handle, None)
+        session.cursor.close()
+        result_handle = None
+
+    return rows, result_handle
+
+
+def _bounded_total_pages(
+    self, connection: sqlite3.Connection, count_query: str, page_size: int
+) -> tuple[int | None, bool]:
+    row_cap = _PAGE_COUNT_CAP * page_size + 1
+    count = connection.execute(
+        f"SELECT COUNT(*) FROM ({count_query} LIMIT ?)", (row_cap,)
+    ).fetchone()[0]
+    if count > _PAGE_COUNT_CAP * page_size:
+        return None, True
+    total_pages = -(-count // page_size) if count else 0
+    return total_pages, False
 ```
 
 Add `PagedBooksResult` to the `book0_core.models` import at the top of the file (the import
@@ -889,6 +918,19 @@ def test_list_authors_page_last_page_has_no_handle(many_books_db: Path):
 
     assert [author.name for author in result.items] == ["Author 7"]
     assert result.handle is None
+
+
+def test_list_books_page_falls_back_when_handle_belongs_to_a_different_resource(
+    many_books_db: Path,
+):
+    # Moved here from Task 3: this fallback case needs two real resource types to
+    # be meaningful, and list_authors_page didn't exist yet in Task 3.
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    authors_first = gateway.list_authors_page(1, 2)
+    result = gateway.list_books_page(2, 2, handle=authors_first.handle)
+
+    assert [book.title for book in result.items] == ["Book 3", "Book 4"]
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1106,7 +1148,7 @@ Add to `tests/unit/test_book0_config.py`:
 def test_load_libraries_reads_default_page_size_when_present(tmp_path: Path):
     config_path = tmp_path / "libraries.toml"
     config_path.write_text(
-        'default-page-size = 25\n\n'
+        "default-page-size = 25\n\n"
         '[libraries]\nfiction = "/path/to/fiction/metadata.db"\n'
     )
 
@@ -1215,9 +1257,7 @@ Add to `tests/unit/test_cli_remote_config.py`:
 ```python
 def test_load_default_page_size_returns_the_configured_value(tmp_path: Path):
     config_path = tmp_path / ".book0-client.toml"
-    config_path.write_text(
-        'server = "http://127.0.0.1:8000"\ndefault-page-size = 25\n'
-    )
+    config_path.write_text('server = "http://127.0.0.1:8000"\ndefault-page-size = 25\n')
 
     assert load_default_page_size(config_path) == 25
 
@@ -1325,7 +1365,11 @@ def test_from_paged_result_converts_books_and_page_metadata():
 
 def test_from_paged_result_keeps_none_total_pages():
     result = PagedBooksResult(
-        items=(), page=1, page_size=10, total_pages=None, has_more_than_shown=True,
+        items=(),
+        page=1,
+        page_size=10,
+        total_pages=None,
+        has_more_than_shown=True,
         handle=None,
     )
 
@@ -1338,8 +1382,12 @@ def test_from_paged_result_keeps_none_total_pages():
 def test_paged_authors_out_from_paged_result_converts_authors():
     author = Author(id="1", name="Frank Herbert")
     result = PagedAuthorsResult(
-        items=(author,), page=1, page_size=10, total_pages=1,
-        has_more_than_shown=False, handle=None,
+        items=(author,),
+        page=1,
+        page_size=10,
+        total_pages=1,
+        has_more_than_shown=False,
+        handle=None,
     )
 
     paged_out = PagedAuthorsOut.from_paged_result(result)
@@ -1356,8 +1404,12 @@ def test_paged_authors_out_from_paged_result_converts_authors():
 def test_paged_publishers_out_from_paged_result_converts_publishers():
     publisher = Publisher(id="1", name="Ace Books")
     result = PagedPublishersResult(
-        items=(publisher,), page=1, page_size=10, total_pages=1,
-        has_more_than_shown=False, handle=None,
+        items=(publisher,),
+        page=1,
+        page_size=10,
+        total_pages=1,
+        has_more_than_shown=False,
+        handle=None,
     )
 
     paged_out = PagedPublishersOut.from_paged_result(result)
@@ -1571,9 +1623,7 @@ def test_list_books_client_page_size_smaller_than_server_default_is_honored(
     app = create_app({"fiction": many_books_db}, default_page_size=5)
     client = TestClient(app)
 
-    response = client.get(
-        "/libraries/books", params={"tag": "fiction", "page_size": 2}
-    )
+    response = client.get("/libraries/books", params={"tag": "fiction", "page_size": 2})
 
     assert response.status_code == 200
     assert response.json()["page_size"] == 2
@@ -1597,9 +1647,7 @@ def test_list_books_non_positive_page_size_is_normalized_to_unpaginated(
     app = create_app({"fiction": many_books_db})
     client = TestClient(app)
 
-    response = client.get(
-        "/libraries/books", params={"tag": "fiction", "page_size": 0}
-    )
+    response = client.get("/libraries/books", params={"tag": "fiction", "page_size": 0})
 
     assert response.status_code == 200
     assert isinstance(response.json(), list)
@@ -1609,9 +1657,7 @@ def test_list_books_non_numeric_page_returns_422(calibre_metadata_db: Path):
     app = create_app({"fiction": calibre_metadata_db})
     client = TestClient(app)
 
-    response = client.get(
-        "/libraries/books", params={"tag": "fiction", "page": "abc"}
-    )
+    response = client.get("/libraries/books", params={"tag": "fiction", "page": "abc"})
 
     assert response.status_code == 422
 
@@ -1675,7 +1721,7 @@ def test_asgi_app_forces_pagination_from_config_files_default_page_size(
     config_path = tmp_path / "book0-libraries.toml"
     config_path.write_text(
         f'default-library = "fiction"\n'
-        f'default-page-size = 2\n\n'
+        f"default-page-size = 2\n\n"
         f'[libraries]\nfiction = "{many_books_db}"\n'
     )
     monkeypatch.setenv(CONFIG_ENV_VAR, str(config_path))
@@ -1764,122 +1810,124 @@ either returns a usable `Path` or raises `TagRequiredError` (an unknown tag rais
 as an unresolvable one) — no `db_path is None` branch is needed or reachable:
 
 ```python
-    @app.get("/libraries/books", response_model=None)
-    def list_books(
-        tag: str | None = None,
-        page: int | None = None,
-        page_size: int | None = None,
-    ) -> list[BookOut] | PagedBooksOut | JSONResponse:
-        try:
-            db_path = _resolve_db_path(tag)
-        except TagRequiredError as error:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "TagRequiredError", "detail": str(error)},
-            )
+@app.get("/libraries/books", response_model=None)
+def list_books(
+    tag: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> list[BookOut] | PagedBooksOut | JSONResponse:
+    try:
+        db_path = _resolve_db_path(tag)
+    except TagRequiredError as error:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "TagRequiredError", "detail": str(error)},
+        )
 
-        effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
+    effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
 
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            if effective_page_size is None:
-                books = gateway.list_books()
-            else:
-                paged_result = gateway.list_books_page(
-                    _resolve_effective_page(page), effective_page_size
-                )
-        except LibraryNotFoundError as error:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "LibraryNotFoundError", "detail": str(error)},
-            )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
-            )
-
+    gateway = SqliteLibraryGateway(db_path)
+    try:
         if effective_page_size is None:
-            return [BookOut.from_book(book) for book in books]
-        return PagedBooksOut.from_paged_result(paged_result)
-
-    @app.get("/libraries/authors", response_model=None)
-    def list_authors(
-        tag: str | None = None,
-        page: int | None = None,
-        page_size: int | None = None,
-    ) -> list[AuthorOut] | PagedAuthorsOut | JSONResponse:
-        try:
-            db_path = _resolve_db_path(tag)
-        except TagRequiredError as error:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "TagRequiredError", "detail": str(error)},
+            books = gateway.list_books()
+        else:
+            paged_result = gateway.list_books_page(
+                _resolve_effective_page(page), effective_page_size
             )
+    except LibraryNotFoundError as error:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "LibraryNotFoundError", "detail": str(error)},
+        )
+    except NotACalibreLibraryError as error:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "NotACalibreLibraryError", "detail": str(error)},
+        )
 
-        effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
+    if effective_page_size is None:
+        return [BookOut.from_book(book) for book in books]
+    return PagedBooksOut.from_paged_result(paged_result)
 
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            if effective_page_size is None:
-                authors = gateway.list_authors()
-            else:
-                paged_result = gateway.list_authors_page(
-                    _resolve_effective_page(page), effective_page_size
-                )
-        except LibraryNotFoundError as error:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "LibraryNotFoundError", "detail": str(error)},
-            )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
-            )
 
+@app.get("/libraries/authors", response_model=None)
+def list_authors(
+    tag: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> list[AuthorOut] | PagedAuthorsOut | JSONResponse:
+    try:
+        db_path = _resolve_db_path(tag)
+    except TagRequiredError as error:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "TagRequiredError", "detail": str(error)},
+        )
+
+    effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
+
+    gateway = SqliteLibraryGateway(db_path)
+    try:
         if effective_page_size is None:
-            return [AuthorOut.from_author(author) for author in authors]
-        return PagedAuthorsOut.from_paged_result(paged_result)
-
-    @app.get("/libraries/publishers", response_model=None)
-    def list_publishers(
-        tag: str | None = None,
-        page: int | None = None,
-        page_size: int | None = None,
-    ) -> list[PublisherOut] | PagedPublishersOut | JSONResponse:
-        try:
-            db_path = _resolve_db_path(tag)
-        except TagRequiredError as error:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "TagRequiredError", "detail": str(error)},
+            authors = gateway.list_authors()
+        else:
+            paged_result = gateway.list_authors_page(
+                _resolve_effective_page(page), effective_page_size
             )
+    except LibraryNotFoundError as error:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "LibraryNotFoundError", "detail": str(error)},
+        )
+    except NotACalibreLibraryError as error:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "NotACalibreLibraryError", "detail": str(error)},
+        )
 
-        effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
+    if effective_page_size is None:
+        return [AuthorOut.from_author(author) for author in authors]
+    return PagedAuthorsOut.from_paged_result(paged_result)
 
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            if effective_page_size is None:
-                publishers = gateway.list_publishers()
-            else:
-                paged_result = gateway.list_publishers_page(
-                    _resolve_effective_page(page), effective_page_size
-                )
-        except LibraryNotFoundError as error:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "LibraryNotFoundError", "detail": str(error)},
-            )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
-            )
 
+@app.get("/libraries/publishers", response_model=None)
+def list_publishers(
+    tag: str | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
+) -> list[PublisherOut] | PagedPublishersOut | JSONResponse:
+    try:
+        db_path = _resolve_db_path(tag)
+    except TagRequiredError as error:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "TagRequiredError", "detail": str(error)},
+        )
+
+    effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
+
+    gateway = SqliteLibraryGateway(db_path)
+    try:
         if effective_page_size is None:
-            return [PublisherOut.from_publisher(publisher) for publisher in publishers]
-        return PagedPublishersOut.from_paged_result(paged_result)
+            publishers = gateway.list_publishers()
+        else:
+            paged_result = gateway.list_publishers_page(
+                _resolve_effective_page(page), effective_page_size
+            )
+    except LibraryNotFoundError as error:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "LibraryNotFoundError", "detail": str(error)},
+        )
+    except NotACalibreLibraryError as error:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "NotACalibreLibraryError", "detail": str(error)},
+        )
+
+    if effective_page_size is None:
+        return [PublisherOut.from_publisher(publisher) for publisher in publishers]
+    return PagedPublishersOut.from_paged_result(paged_result)
 ```
 
 Update `src/book0_api/asgi.py`:
@@ -2112,7 +2160,11 @@ class HttpLibraryGateway:
             page += 1  # type: ignore[operator]
             response = self._client.get(
                 "/libraries/books",
-                params={**self._params(), "page": str(page), "page_size": str(page_size)},
+                params={
+                    **self._params(),
+                    "page": str(page),
+                    "page_size": str(page_size),
+                },
             )
             self._raise_for_error(response)
             next_page = response.json()
@@ -2129,9 +2181,7 @@ class HttpLibraryGateway:
             return self._collect_all_author_pages(body)
         return [self._author_from_json(row) for row in body]
 
-    def _collect_all_author_pages(
-        self, first_page: dict[str, object]
-    ) -> list[Author]:
+    def _collect_all_author_pages(self, first_page: dict[str, object]) -> list[Author]:
         page_size = first_page["page_size"]
         page = first_page["page"]
         items = first_page["items"]  # type: ignore[assignment]
@@ -2140,7 +2190,11 @@ class HttpLibraryGateway:
             page += 1  # type: ignore[operator]
             response = self._client.get(
                 "/libraries/authors",
-                params={**self._params(), "page": str(page), "page_size": str(page_size)},
+                params={
+                    **self._params(),
+                    "page": str(page),
+                    "page_size": str(page_size),
+                },
             )
             self._raise_for_error(response)
             next_page = response.json()
@@ -2168,7 +2222,11 @@ class HttpLibraryGateway:
             page += 1  # type: ignore[operator]
             response = self._client.get(
                 "/libraries/publishers",
-                params={**self._params(), "page": str(page), "page_size": str(page_size)},
+                params={
+                    **self._params(),
+                    "page": str(page),
+                    "page_size": str(page_size),
+                },
             )
             self._raise_for_error(response)
             next_page = response.json()
@@ -2635,41 +2693,39 @@ Replace the dispatch block inside `run` (from `if args.command == "authors":` th
 `print(render_book_table(gateway.list_books()))`):
 
 ```python
-        if args.command == "books-detail":
-            ids = (
-                [segment.strip() for segment in args.ids.split(",")] if args.ids else []
-            )
-            result = gateway.get_book_details(ids)
-            ordered_books = order_book_details_by_ids(result, ids)
-            print(render_book_details_table(ordered_books))
-            missing_ids_message = format_missing_ids_message(result.missing_ids)
-            if missing_ids_message is not None:
-                print(missing_ids_message)
-        else:
-            page_size = _resolve_page_size(args.page_size, config.default_page_size)
-            page = _resolve_page(args.page)
+if args.command == "books-detail":
+    ids = [segment.strip() for segment in args.ids.split(",")] if args.ids else []
+    result = gateway.get_book_details(ids)
+    ordered_books = order_book_details_by_ids(result, ids)
+    print(render_book_details_table(ordered_books))
+    missing_ids_message = format_missing_ids_message(result.missing_ids)
+    if missing_ids_message is not None:
+        print(missing_ids_message)
+else:
+    page_size = _resolve_page_size(args.page_size, config.default_page_size)
+    page = _resolve_page(args.page)
 
-            if args.command == "authors":
-                if page_size is None:
-                    print(render_author_table(gateway.list_authors()))
-                else:
-                    paged = gateway.list_authors_page(page, page_size)
-                    print(render_author_table(list(paged.items)))
-                    print(format_page_footer(paged.page, paged.total_pages))
-            elif args.command == "publishers":
-                if page_size is None:
-                    print(render_publisher_table(gateway.list_publishers()))
-                else:
-                    paged = gateway.list_publishers_page(page, page_size)
-                    print(render_publisher_table(list(paged.items)))
-                    print(format_page_footer(paged.page, paged.total_pages))
-            else:
-                if page_size is None:
-                    print(render_book_table(gateway.list_books()))
-                else:
-                    paged = gateway.list_books_page(page, page_size)
-                    print(render_book_table(list(paged.items)))
-                    print(format_page_footer(paged.page, paged.total_pages))
+    if args.command == "authors":
+        if page_size is None:
+            print(render_author_table(gateway.list_authors()))
+        else:
+            paged = gateway.list_authors_page(page, page_size)
+            print(render_author_table(list(paged.items)))
+            print(format_page_footer(paged.page, paged.total_pages))
+    elif args.command == "publishers":
+        if page_size is None:
+            print(render_publisher_table(gateway.list_publishers()))
+        else:
+            paged = gateway.list_publishers_page(page, page_size)
+            print(render_publisher_table(list(paged.items)))
+            print(format_page_footer(paged.page, paged.total_pages))
+    else:
+        if page_size is None:
+            print(render_book_table(gateway.list_books()))
+        else:
+            paged = gateway.list_books_page(page, page_size)
+            print(render_book_table(list(paged.items)))
+            print(format_page_footer(paged.page, paged.total_pages))
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -2796,15 +2852,11 @@ def test_run_does_not_paginate_when_no_page_size_resolves(
     assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
 
 
-def test_run_paginates_authors(
-    many_books_db: Path, capsys: pytest.CaptureFixture[str]
-):
+def test_run_paginates_authors(many_books_db: Path, capsys: pytest.CaptureFixture[str]):
     app = create_app({"fiction": many_books_db})
     client = TestClient(app)
 
-    exit_code = run(
-        ["authors", "--tag", "fiction", "--page-size", "2"], client=client
-    )
+    exit_code = run(["authors", "--tag", "fiction", "--page-size", "2"], client=client)
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -2898,55 +2950,51 @@ following `try:`, replace the dispatch block (from `if args.command == "authors"
 `print(render_book_table(gateway.list_books()))`):
 
 ```python
-            if args.command == "books-detail":
-                ids = (
-                    [segment.strip() for segment in args.ids.split(",")]
-                    if args.ids
-                    else []
-                )
-                result = gateway.get_book_details(ids)
-                ordered_books = order_book_details_by_ids(result, ids)
-                print(render_book_details_table(ordered_books))
-                missing_ids_message = format_missing_ids_message(result.missing_ids)
-                if missing_ids_message is not None:
-                    print(missing_ids_message)
-            else:
-                config_page_size = None
-                page_size_config_path = find_config_file()
-                if page_size_config_path is not None:
-                    try:
-                        config_page_size = load_default_page_size(page_size_config_path)
-                    except tomllib.TOMLDecodeError as error:
-                        print(
-                            f"Invalid book0-remote client config file "
-                            f"{page_size_config_path}: {error}",
-                            file=sys.stderr,
-                        )
-                        return 1
-                page_size = _resolve_page_size(args.page_size, config_page_size)
-                page = _resolve_page(args.page)
+if args.command == "books-detail":
+    ids = [segment.strip() for segment in args.ids.split(",")] if args.ids else []
+    result = gateway.get_book_details(ids)
+    ordered_books = order_book_details_by_ids(result, ids)
+    print(render_book_details_table(ordered_books))
+    missing_ids_message = format_missing_ids_message(result.missing_ids)
+    if missing_ids_message is not None:
+        print(missing_ids_message)
+else:
+    config_page_size = None
+    page_size_config_path = find_config_file()
+    if page_size_config_path is not None:
+        try:
+            config_page_size = load_default_page_size(page_size_config_path)
+        except tomllib.TOMLDecodeError as error:
+            print(
+                f"Invalid book0-remote client config file "
+                f"{page_size_config_path}: {error}",
+                file=sys.stderr,
+            )
+            return 1
+    page_size = _resolve_page_size(args.page_size, config_page_size)
+    page = _resolve_page(args.page)
 
-                if args.command == "authors":
-                    if page_size is None:
-                        print(render_author_table(gateway.list_authors()))
-                    else:
-                        paged = gateway.list_authors_page(page, page_size)
-                        print(render_author_table(list(paged.items)))
-                        print(format_page_footer(paged.page, paged.total_pages))
-                elif args.command == "publishers":
-                    if page_size is None:
-                        print(render_publisher_table(gateway.list_publishers()))
-                    else:
-                        paged = gateway.list_publishers_page(page, page_size)
-                        print(render_publisher_table(list(paged.items)))
-                        print(format_page_footer(paged.page, paged.total_pages))
-                else:
-                    if page_size is None:
-                        print(render_book_table(gateway.list_books()))
-                    else:
-                        paged = gateway.list_books_page(page, page_size)
-                        print(render_book_table(list(paged.items)))
-                        print(format_page_footer(paged.page, paged.total_pages))
+    if args.command == "authors":
+        if page_size is None:
+            print(render_author_table(gateway.list_authors()))
+        else:
+            paged = gateway.list_authors_page(page, page_size)
+            print(render_author_table(list(paged.items)))
+            print(format_page_footer(paged.page, paged.total_pages))
+    elif args.command == "publishers":
+        if page_size is None:
+            print(render_publisher_table(gateway.list_publishers()))
+        else:
+            paged = gateway.list_publishers_page(page, page_size)
+            print(render_publisher_table(list(paged.items)))
+            print(format_page_footer(paged.page, paged.total_pages))
+    else:
+        if page_size is None:
+            print(render_book_table(gateway.list_books()))
+        else:
+            paged = gateway.list_books_page(page, page_size)
+            print(render_book_table(list(paged.items)))
+            print(format_page_footer(paged.page, paged.total_pages))
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
