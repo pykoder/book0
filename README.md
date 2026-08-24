@@ -57,6 +57,21 @@ ID  Title  Authors        Publisher  Series           Series Index  Tags        
 1   Dune   Frank Herbert  Ace Books  Dune Chronicles  1.0           sci-fi & classic  1965-08-01  /path/to/fiction/Frank Herbert/Dune (1)/cover.jpg
 ```
 
+Add `--page-size <N>` to page a `books`/`authors`/`publishers` listing instead of dumping the
+whole library (`books-detail` is unrelated and has no `--page`) - `--page <N>` picks which
+page (default `1`); a page footer (`Page 1 of 4`, or `Page 1 of many` past a bounded count) is
+printed after the table:
+
+```sh
+uv run book0 books --tag <tag> --page-size 50
+uv run book0 books --tag <tag> --page 2 --page-size 50
+```
+
+`--page-size` also has a config-file fallback: set `default-page-size = 50` in `.book0.toml`
+to paginate every listing by default without passing the flag each time; `--page-size`
+overrides it when given, and a `--page-size 0`/negative value (or a value with no source at
+all) means "not paginated", matching today's full-listing behavior.
+
 `books-detail` never errors on an unknown id - it prints a `Missing ids: ...` line after the
 table (or on its own, if none of the requested ids were found) instead.
 
@@ -221,6 +236,15 @@ that isn't configured on the server behaves like an empty library rather than an
 configured-but-broken library on the server (missing file, not a Calibre library), `--tag`
 omitted with no `default-library` configured on the server, or an unreachable server all print
 a one-line error to stderr and exit with status 1.
+
+`--page`/`--page-size` work the same way as `book0`'s, with `.book0-client.toml`'s
+`default-page-size` as the config-file fallback instead of `.book0.toml`'s. A server operator
+can additionally set `default-page-size` in `book0-libraries.toml` as a hard ceiling - it caps
+any client-requested `--page-size` down to that value, and forces pagination even when a
+client sends none at all; `book0-remote` handles a forced response transparently, so
+`books`/`authors`/`publishers` without `--page-size` still show the complete listing (just via
+more requests under the hood) unless you pass `--page-size` yourself to see one page at a
+time.
 
 `books-detail`'s `Cover Path` column shows the local filesystem path to a cover once it has
 been downloaded and cached, or `(unavailable)` when the server reports the book has a cover but
