@@ -370,7 +370,9 @@ def test_run_prefers_explicit_server_flag_over_book0_client_toml(
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-    (tmp_path / ".book0-client.toml").write_text("not valid toml === \n")
+    (tmp_path / ".book0-client.toml").write_text(
+        'server = "http://should-not-be-used"\n'
+    )
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(["--server", "unused", "--tag", "fiction"], client=client)
@@ -530,3 +532,125 @@ def test_run_reports_error_for_invalid_cover_cache_dir_config(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "Invalid book0-remote client config file" in captured.err
+
+
+def test_run_paginates_books_when_page_size_flag_is_given(
+    many_books_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    exit_code = run(
+        ["--server", "unused", "--tag", "fiction", "--page-size", "2"], client=client
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Book 1" in captured.out
+    assert "Book 3" not in captured.out
+    assert captured.out.strip().endswith("Page 1 of 4")
+
+
+def test_run_paginates_books_to_the_requested_page(
+    many_books_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    exit_code = run(
+        ["--server", "unused", "--tag", "fiction", "--page", "2", "--page-size", "2"],
+        client=client,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Book 3" in captured.out
+    assert captured.out.strip().endswith("Page 2 of 4")
+
+
+def test_run_uses_client_config_default_page_size_when_flag_is_omitted(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    (tmp_path / ".book0-client.toml").write_text(
+        'server = "http://testserver"\ndefault-page-size = 2\n'
+    )
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    exit_code = run(["--tag", "fiction"], client=client)
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.strip().endswith("Page 1 of 4")
+
+
+def test_run_page_size_flag_overrides_client_config_default(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    (tmp_path / ".book0-client.toml").write_text(
+        'server = "http://testserver"\ndefault-page-size = 2\n'
+    )
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    exit_code = run(["--tag", "fiction", "--page-size", "5"], client=client)
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.strip().endswith("Page 1 of 2")
+
+
+def test_run_does_not_paginate_when_no_page_size_resolves(
+    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    exit_code = run(["--server", "unused", "--tag", "fiction"], client=client)
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+
+
+def test_run_paginates_authors(many_books_db: Path, capsys: pytest.CaptureFixture[str]):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    exit_code = run(
+        ["authors", "--server", "unused", "--tag", "fiction", "--page-size", "2"],
+        client=client,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Author 1" in captured.out
+    assert captured.out.strip().endswith("Page 1 of 4")
+
+
+def test_run_paginates_publishers(
+    many_books_db: Path, capsys: pytest.CaptureFixture[str]
+):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    exit_code = run(
+        ["publishers", "--server", "unused", "--tag", "fiction", "--page-size", "2"],
+        client=client,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Publisher 1" in captured.out
+    assert captured.out.strip().endswith("Page 1 of 4")
