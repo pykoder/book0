@@ -598,3 +598,47 @@ def test_list_books_page_expires_a_session_after_the_timeout(
     result = gateway.list_books_page(2, 2, handle=first.handle)
 
     assert [book.title for book in result.items] == ["Book 3", "Book 4"]
+
+
+def test_list_authors_page_returns_the_requested_page_in_name_order(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_authors_page(1, 2)
+
+    assert [author.name for author in result.items] == ["Author 1", "Author 2"]
+    assert result.total_pages == 4
+
+
+def test_list_authors_page_reuses_the_session_for_the_immediate_next_page(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.list_authors_page(1, 2)
+    second = gateway.list_authors_page(2, 2, handle=first.handle)
+
+    assert [author.name for author in second.items] == ["Author 3", "Author 4"]
+
+
+def test_list_authors_page_last_page_has_no_handle(many_books_db: Path):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_authors_page(4, 2)
+
+    assert [author.name for author in result.items] == ["Author 7"]
+    assert result.handle is None
+
+
+def test_list_books_page_falls_back_when_handle_belongs_to_a_different_resource(
+    many_books_db: Path,
+):
+    # Moved here from Task 3: this fallback case needs two real resource types to
+    # be meaningful, and list_authors_page didn't exist yet in Task 3.
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    authors_first = gateway.list_authors_page(1, 2)
+    result = gateway.list_books_page(2, 2, handle=authors_first.handle)
+
+    assert [book.title for book in result.items] == ["Book 3", "Book 4"]

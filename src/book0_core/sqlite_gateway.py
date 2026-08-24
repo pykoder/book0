@@ -11,6 +11,7 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    PagedAuthorsResult,
     PagedBooksResult,
     Publisher,
     Series,
@@ -83,6 +84,9 @@ _PAGE_COUNT_CAP = 100  # in pages; the row cap is _PAGE_COUNT_CAP * page_size
 
 _LIST_BOOKS_QUERY_FROM_OFFSET = _LIST_BOOKS_QUERY + "\n    LIMIT -1 OFFSET ?"
 _LIST_BOOKS_COUNT_QUERY = "SELECT books.id FROM books"
+
+_LIST_AUTHORS_QUERY_FROM_OFFSET = _LIST_AUTHORS_QUERY + " LIMIT -1 OFFSET ?"
+_LIST_AUTHORS_COUNT_QUERY = "SELECT id FROM authors"
 
 
 @dataclass
@@ -202,6 +206,34 @@ class SqliteLibraryGateway:
         )
         return PagedBooksResult(
             items=books,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=result_handle,
+        )
+
+    def list_authors_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedAuthorsResult:
+        connection = self._connect()
+        rows, result_handle = self._fetch_page(
+            connection,
+            "authors",
+            page,
+            page_size,
+            handle,
+            _LIST_AUTHORS_QUERY_FROM_OFFSET,
+        )
+        total_pages, has_more = self._bounded_total_pages(
+            connection, _LIST_AUTHORS_COUNT_QUERY, page_size
+        )
+        authors = tuple(
+            Author(id=str(row[0]), name=row[1])  # type: ignore[arg-type]
+            for row in rows
+        )
+        return PagedAuthorsResult(
+            items=authors,
             page=page,
             page_size=page_size,
             total_pages=total_pages,
