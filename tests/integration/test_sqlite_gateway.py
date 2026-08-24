@@ -527,6 +527,18 @@ def test_list_books_page_falls_back_to_a_fresh_fetch_outside_the_reusable_range(
     assert [book.title for book in repeated.items] == ["Book 1", "Book 2"]
 
 
+def test_list_books_page_closes_the_superseded_session_on_a_same_stream_fallback(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.list_books_page(1, 2)
+    assert first.handle in gateway._sessions
+    gateway.list_books_page(1, 2, handle=first.handle)  # repeats page 1, not next
+
+    assert first.handle not in gateway._sessions
+
+
 def test_list_books_page_falls_back_when_handle_is_unknown(many_books_db: Path):
     gateway = SqliteLibraryGateway(many_books_db)
 

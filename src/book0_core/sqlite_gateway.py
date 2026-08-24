@@ -251,6 +251,21 @@ class SqliteLibraryGateway:
             session.last_access = self._now()
             result_handle: str | None = handle
         else:
+            # A known handle for the *same* resource/page_size that just isn't the
+            # session's next page (a repeat, a backward jump) is superseded, not
+            # merely unrelated - close it now rather than waiting out the timeout.
+            # A handle that mismatches on resource or page_size might still be a
+            # different, still-wanted session under its own handle - leave it for
+            # the timeout instead of closing it as a side effect of this call.
+            if (
+                session is not None
+                and handle is not None
+                and session.resource == resource
+                and session.page_size == page_size
+            ):
+                self._sessions.pop(handle, None)
+                session.cursor.close()
+
             offset = (page - 1) * page_size
             cursor = connection.execute(query_from_offset, (offset,))
             rows = cursor.fetchmany(page_size)
