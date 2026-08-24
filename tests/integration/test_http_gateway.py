@@ -14,7 +14,12 @@ from book0_core.errors import (
     TagRequiredError,
 )
 from book0_core.gateway import LibraryGateway
-from book0_core.models import BookDetails
+from book0_core.models import (
+    BookDetails,
+    PagedAuthorsResult,
+    PagedBooksResult,
+    PagedPublishersResult,
+)
 from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
@@ -402,6 +407,98 @@ class _CoverInjectionClient:
 
     def get(self, url: str, params: object = None) -> _CoverInjectionResponse:
         return _CoverInjectionResponse(200, content=b"malicious-bytes")
+
+
+def test_list_books_page_returns_the_requested_page(many_books_db: Path):
+    client = _client_for({"fiction": many_books_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    result: PagedBooksResult = gateway.list_books_page(1, 2)
+
+    assert [book.title for book in result.items] == ["Book 1", "Book 2"]
+    assert result.page == 1
+    assert result.page_size == 2
+    assert result.total_pages == 4
+
+
+def test_list_books_page_never_sends_the_handle_over_the_wire(
+    many_books_db: Path, monkeypatch: pytest.MonkeyPatch
+):
+    client = _client_for({"fiction": many_books_db})
+    captured_params: list[dict[str, str]] = []
+    real_get = client.get
+
+    def spying_get(url: str, **kwargs: object) -> httpx.Response:
+        captured_params.append(dict(kwargs.get("params", {})))  # type: ignore[arg-type]
+        return real_get(url, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(client, "get", spying_get)
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    gateway.list_books_page(2, 2, handle="some-handle-from-a-previous-call")
+
+    assert all("handle" not in params for params in captured_params)
+
+
+def test_close_pagination_is_a_no_op(many_books_db: Path):
+    client = _client_for({"fiction": many_books_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    gateway.close_pagination("any-handle")  # no exception
+
+
+def test_list_authors_page_returns_the_requested_page(many_books_db: Path):
+    client = _client_for({"fiction": many_books_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    result: PagedAuthorsResult = gateway.list_authors_page(1, 2)
+
+    assert [author.name for author in result.items] == ["Author 1", "Author 2"]
+
+
+def test_list_publishers_page_returns_the_requested_page(many_books_db: Path):
+    client = _client_for({"fiction": many_books_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    result: PagedPublishersResult = gateway.list_publishers_page(1, 2)
+
+    assert [publisher.name for publisher in result.items] == [
+        "Publisher 1",
+        "Publisher 2",
+    ]
+
+
+def test_list_books_transparently_fetches_every_page_when_server_forces_pagination(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db}, default_page_size=2)
+    client = TestClient(app)
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    books = gateway.list_books()
+
+    assert [book.title for book in books] == [f"Book {i}" for i in range(1, 8)]
+
+
+def test_list_authors_transparently_fetches_every_page_when_server_forces_pagination(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db}, default_page_size=2)
+    client = TestClient(app)
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    authors = gateway.list_authors()
+
+    assert [author.name for author in authors] == [f"Author {i}" for i in range(1, 8)]
+
+
+def test_list_books_returns_plain_list_unchanged_when_server_does_not_force_pagination(
+    calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    assert gateway.list_books() == CALIBRE_LIBRARY_BOOKS
 
 
 def test_resolve_cover_rejects_a_path_traversal_book_id(tmp_path: Path):
