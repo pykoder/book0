@@ -601,6 +601,8 @@ def test_list_books_page_expires_a_session_after_the_timeout(
     result = gateway.list_books_page(2, 2, handle=first.handle)
 
     assert [book.title for book in result.items] == ["Book 3", "Book 4"]
+    assert first.handle not in gateway._sessions
+    assert result.handle != first.handle
 
 
 def test_list_authors_page_returns_the_requested_page_in_name_order(
