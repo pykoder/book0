@@ -19,6 +19,7 @@ from book0_core.errors import (
     NotACalibreLibraryError,
     TagRequiredError,
 )
+from book0_core.gateway import LibraryGateway
 from book0_presentation.tables import (
     format_missing_ids_message,
     format_page_footer,
@@ -135,7 +136,7 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
             if cache_dir is None:
                 cache_dir = xdg_cache_path()
 
-        gateway = HttpLibraryGateway(
+        gateway: LibraryGateway = HttpLibraryGateway(
             client,
             args.tag,
             with_covers=getattr(args, "with_covers", False),
