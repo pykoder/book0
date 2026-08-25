@@ -480,6 +480,20 @@ def test_list_books_transparently_fetches_every_page_when_server_forces_paginati
     assert [book.title for book in books] == [f"Book {i}" for i in range(1, 8)]
 
 
+def test_collect_all_book_pages_does_not_hang_when_page_size_is_zero(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db}, default_page_size=2)
+    client = TestClient(app)
+    gateway = HttpLibraryGateway(client, "fiction")
+    first_page = client.get("/libraries/books", params={"tag": "fiction"}).json()
+    first_page["page_size"] = 0
+
+    books = gateway._collect_all_book_pages(first_page)
+
+    assert [book.title for book in books] == ["Book 1", "Book 2"]
+
+
 def test_list_authors_transparently_fetches_every_page_when_server_forces_pagination(
     many_books_db: Path,
 ):

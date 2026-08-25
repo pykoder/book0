@@ -43,11 +43,14 @@ def _resolve_effective_page_size(
         if requested_page_size is not None and requested_page_size > 0
         else None
     )
-    if server_default is not None:
+    normalized_default = (
+        server_default if server_default is not None and server_default > 0 else None
+    )
+    if normalized_default is not None:
         return (
-            min(normalized_request, server_default)
+            min(normalized_request, normalized_default)
             if normalized_request is not None
-            else server_default
+            else normalized_default
         )
     return normalized_request
 

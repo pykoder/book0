@@ -66,7 +66,7 @@ class HttpLibraryGateway:
         page = first_page["page"]
         items = first_page["items"]  # type: ignore[assignment]
         books = [self._book_from_json(row) for row in items]  # type: ignore[attr-defined]
-        while len(items) == page_size:  # type: ignore[arg-type]
+        while page_size and len(items) == page_size:  # type: ignore[arg-type]
             page += 1  # type: ignore[operator]
             response = self._client.get(
                 "/libraries/books",
@@ -96,7 +96,7 @@ class HttpLibraryGateway:
         page = first_page["page"]
         items = first_page["items"]  # type: ignore[assignment]
         authors = [self._author_from_json(row) for row in items]  # type: ignore[attr-defined]
-        while len(items) == page_size:  # type: ignore[arg-type]
+        while page_size and len(items) == page_size:  # type: ignore[arg-type]
             page += 1  # type: ignore[operator]
             response = self._client.get(
                 "/libraries/authors",
@@ -128,7 +128,7 @@ class HttpLibraryGateway:
         page = first_page["page"]
         items = first_page["items"]  # type: ignore[assignment]
         publishers = [self._publisher_from_json(row) for row in items]  # type: ignore[attr-defined]
-        while len(items) == page_size:  # type: ignore[arg-type]
+        while page_size and len(items) == page_size:  # type: ignore[arg-type]
             page += 1  # type: ignore[operator]
             response = self._client.get(
                 "/libraries/publishers",

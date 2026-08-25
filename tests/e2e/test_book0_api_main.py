@@ -561,6 +561,30 @@ def test_list_books_client_page_size_smaller_than_server_default_is_honored(
     assert response.json()["page_size"] == 2
 
 
+def test_list_books_non_positive_server_default_page_size_is_ignored(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db}, default_page_size=-5)
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+    assert len(response.json()) == 7
+
+
+def test_list_books_zero_server_default_page_size_is_ignored(many_books_db: Path):
+    app = create_app({"fiction": many_books_db}, default_page_size=0)
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+    assert len(response.json()) == 7
+
+
 def test_list_books_non_positive_page_is_normalized_to_one(many_books_db: Path):
     app = create_app({"fiction": many_books_db})
     client = TestClient(app)
