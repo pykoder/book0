@@ -1,5 +1,8 @@
 import re
 import sqlite3
+import time
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
@@ -8,6 +11,9 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    PagedAuthorsResult,
+    PagedBooksResult,
+    PagedPublishersResult,
     Publisher,
     Series,
     SeriesItem,
@@ -74,23 +80,50 @@ _UNDEFINED_PUBDATE_PREFIX = "0101-01-01"
 
 _VALID_ID_PATTERN = re.compile(r"^[1-9]\d*$")
 
+_SESSION_TIMEOUT_SECONDS = 60
+_PAGE_COUNT_CAP = 100  # in pages; the row cap is _PAGE_COUNT_CAP * page_size
+
+_LIST_BOOKS_QUERY_FROM_OFFSET = _LIST_BOOKS_QUERY + "\n    LIMIT -1 OFFSET ?"
+_LIST_BOOKS_COUNT_QUERY = "SELECT books.id FROM books"
+
+_LIST_AUTHORS_QUERY_FROM_OFFSET = _LIST_AUTHORS_QUERY + " LIMIT -1 OFFSET ?"
+_LIST_AUTHORS_COUNT_QUERY = "SELECT id FROM authors"
+
+_LIST_PUBLISHERS_QUERY_FROM_OFFSET = _LIST_PUBLISHERS_QUERY + " LIMIT -1 OFFSET ?"
+_LIST_PUBLISHERS_COUNT_QUERY = "SELECT id FROM publishers"
+
+
+@dataclass
+class _PaginationSession:
+    resource: str
+    page_size: int
+    next_page: int
+    cursor: sqlite3.Cursor
+    last_access: float
+
 
 class SqliteLibraryGateway:
     def __init__(self, library_path: Path) -> None:
         self._db_path = (
             library_path / "metadata.db" if library_path.is_dir() else library_path
         )
+        self._connection: sqlite3.Connection | None = None
+        self._sessions: dict[str, _PaginationSession] = {}
+
+    def _connect(self) -> sqlite3.Connection:
+        if self._connection is None:
+            if not self._db_path.exists():
+                raise LibraryNotFoundError(
+                    f"Calibre library not found: {self._db_path}"
+                )
+            connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+            self._check_is_calibre_library(connection)
+            self._connection = connection
+        return self._connection
 
     def list_books(self) -> list[Book]:
-        if not self._db_path.exists():
-            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
-
-        connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        try:
-            self._check_is_calibre_library(connection)
-            rows = connection.execute(_LIST_BOOKS_QUERY).fetchall()
-        finally:
-            connection.close()
+        connection = self._connect()
+        rows = connection.execute(_LIST_BOOKS_QUERY).fetchall()
 
         return [
             Book(
@@ -103,45 +136,24 @@ class SqliteLibraryGateway:
         ]
 
     def list_authors(self) -> list[Author]:
-        if not self._db_path.exists():
-            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
-
-        connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        try:
-            self._check_is_calibre_library(connection)
-            rows = connection.execute(_LIST_AUTHORS_QUERY).fetchall()
-        finally:
-            connection.close()
+        connection = self._connect()
+        rows = connection.execute(_LIST_AUTHORS_QUERY).fetchall()
 
         return [Author(id=str(row[0]), name=row[1]) for row in rows]
 
     def list_publishers(self) -> list[Publisher]:
-        if not self._db_path.exists():
-            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
-
-        connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        try:
-            self._check_is_calibre_library(connection)
-            rows = connection.execute(_LIST_PUBLISHERS_QUERY).fetchall()
-        finally:
-            connection.close()
+        connection = self._connect()
+        rows = connection.execute(_LIST_PUBLISHERS_QUERY).fetchall()
 
         return [Publisher(id=str(row[0]), name=row[1]) for row in rows]
 
     def get_book_details(self, ids: list[str]) -> BookDetailsResult:
-        if not self._db_path.exists():
-            raise LibraryNotFoundError(f"Calibre library not found: {self._db_path}")
-
         deduped_ids, valid_ids = self._partition_ids(ids)
 
-        connection = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        try:
-            self._check_is_calibre_library(connection)
-            placeholders = ", ".join("?" for _ in valid_ids)
-            query = _GET_BOOK_DETAILS_QUERY_TEMPLATE.format(placeholders=placeholders)
-            rows = connection.execute(query, valid_ids).fetchall()
-        finally:
-            connection.close()
+        connection = self._connect()
+        placeholders = ", ".join("?" for _ in valid_ids)
+        query = _GET_BOOK_DETAILS_QUERY_TEMPLATE.format(placeholders=placeholders)
+        rows = connection.execute(query, valid_ids).fetchall()
 
         books = []
         found_ids: set[str] = set()
@@ -176,6 +188,179 @@ class SqliteLibraryGateway:
 
         missing_ids = tuple(id_ for id_ in deduped_ids if id_ not in found_ids)
         return BookDetailsResult(books=tuple(books), missing_ids=missing_ids)
+
+    def list_books_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedBooksResult:
+        connection = self._connect()
+        rows, result_handle = self._fetch_page(
+            connection, "books", page, page_size, handle, _LIST_BOOKS_QUERY_FROM_OFFSET
+        )
+        total_pages, has_more = self._bounded_total_pages(
+            connection, _LIST_BOOKS_COUNT_QUERY, page_size
+        )
+        books = tuple(
+            Book(
+                id=str(row[0]),
+                title=row[1],  # type: ignore[arg-type]
+                authors=tuple(row[2].split(", ")) if row[2] else (),  # type: ignore[attr-defined]
+                pubdate=self._normalize_pubdate(row[3]),  # type: ignore[arg-type]
+            )
+            for row in rows
+        )
+        return PagedBooksResult(
+            items=books,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=result_handle,
+        )
+
+    def list_authors_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedAuthorsResult:
+        connection = self._connect()
+        rows, result_handle = self._fetch_page(
+            connection,
+            "authors",
+            page,
+            page_size,
+            handle,
+            _LIST_AUTHORS_QUERY_FROM_OFFSET,
+        )
+        total_pages, has_more = self._bounded_total_pages(
+            connection, _LIST_AUTHORS_COUNT_QUERY, page_size
+        )
+        authors = tuple(
+            Author(id=str(row[0]), name=row[1])  # type: ignore[arg-type]
+            for row in rows
+        )
+        return PagedAuthorsResult(
+            items=authors,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=result_handle,
+        )
+
+    def list_publishers_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedPublishersResult:
+        connection = self._connect()
+        rows, result_handle = self._fetch_page(
+            connection,
+            "publishers",
+            page,
+            page_size,
+            handle,
+            _LIST_PUBLISHERS_QUERY_FROM_OFFSET,
+        )
+        total_pages, has_more = self._bounded_total_pages(
+            connection, _LIST_PUBLISHERS_COUNT_QUERY, page_size
+        )
+        publishers = tuple(
+            Publisher(id=str(row[0]), name=row[1])  # type: ignore[arg-type]
+            for row in rows
+        )
+        return PagedPublishersResult(
+            items=publishers,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=result_handle,
+        )
+
+    def close_pagination(self, handle: str) -> None:
+        session = self._sessions.pop(handle, None)
+        if session is not None:
+            session.cursor.close()
+
+    def _now(self) -> float:
+        return time.monotonic()
+
+    def _prune_expired_sessions(self) -> None:
+        now = self._now()
+        expired = [
+            handle
+            for handle, session in self._sessions.items()
+            if now - session.last_access > _SESSION_TIMEOUT_SECONDS
+        ]
+        for handle in expired:
+            self._sessions.pop(handle).cursor.close()
+
+    def _fetch_page(
+        self,
+        connection: sqlite3.Connection,
+        resource: str,
+        page: int,
+        page_size: int,
+        handle: str | None,
+        query_from_offset: str,
+    ) -> tuple[list[tuple[object, ...]], str | None]:
+        self._prune_expired_sessions()
+
+        session = self._sessions.get(handle) if handle is not None else None
+        reusable = (
+            session is not None
+            and session.resource == resource
+            and session.page_size == page_size
+            and session.next_page == page
+        )
+        if reusable and session is not None and handle is not None:
+            rows = session.cursor.fetchmany(page_size)
+            session.next_page += 1
+            session.last_access = self._now()
+            result_handle: str | None = handle
+        else:
+            # A known handle for the *same* resource/page_size that just isn't the
+            # session's next page (a repeat, a backward jump) is superseded, not
+            # merely unrelated - close it now rather than waiting out the timeout.
+            # A handle that mismatches on resource or page_size might still be a
+            # different, still-wanted session under its own handle - leave it for
+            # the timeout instead of closing it as a side effect of this call.
+            if (
+                session is not None
+                and handle is not None
+                and session.resource == resource
+                and session.page_size == page_size
+            ):
+                self._sessions.pop(handle, None)
+                session.cursor.close()
+
+            offset = (page - 1) * page_size
+            cursor = connection.execute(query_from_offset, (offset,))
+            rows = cursor.fetchmany(page_size)
+            session = _PaginationSession(
+                resource=resource,
+                page_size=page_size,
+                next_page=page + 1,
+                cursor=cursor,
+                last_access=self._now(),
+            )
+            result_handle = str(uuid.uuid4())
+            self._sessions[result_handle] = session
+
+        if len(rows) < page_size:
+            self._sessions.pop(result_handle, None)  # type: ignore[arg-type]
+            session.cursor.close()
+            result_handle = None
+
+        return rows, result_handle
+
+    def _bounded_total_pages(
+        self, connection: sqlite3.Connection, count_query: str, page_size: int
+    ) -> tuple[int | None, bool]:
+        row_cap = _PAGE_COUNT_CAP * page_size + 1
+        count = connection.execute(
+            f"SELECT COUNT(*) FROM ({count_query} LIMIT ?)", (row_cap,)
+        ).fetchone()[0]
+        if count > _PAGE_COUNT_CAP * page_size:
+            return None, True
+        total_pages = -(-count // page_size) if count else 0
+        return total_pages, False
 
     @staticmethod
     def _compute_cover_path(

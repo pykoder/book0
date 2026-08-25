@@ -50,3 +50,33 @@ class BookDetails:
 class BookDetailsResult:
     books: tuple[BookDetails, ...]
     missing_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PagedBooksResult:
+    items: tuple[Book, ...]
+    page: int
+    page_size: int
+    total_pages: int | None
+    has_more_than_shown: bool
+    handle: str | None
+
+
+@dataclass(frozen=True)
+class PagedAuthorsResult:
+    items: tuple[Author, ...]
+    page: int
+    page_size: int
+    total_pages: int | None
+    has_more_than_shown: bool
+    handle: str | None
+
+
+@dataclass(frozen=True)
+class PagedPublishersResult:
+    items: tuple[Publisher, ...]
+    page: int
+    page_size: int
+    total_pages: int | None
+    has_more_than_shown: bool
+    handle: str | None

@@ -8,6 +8,7 @@ from book0_cli_remote.config import (
     LOCAL_CONFIG_FILENAME,
     find_config_file,
     load_cover_cache_dir,
+    load_default_page_size,
     load_server,
     xdg_cache_path,
     xdg_config_path,
@@ -18,8 +19,10 @@ from book0_core.errors import (
     NotACalibreLibraryError,
     TagRequiredError,
 )
+from book0_core.gateway import LibraryGateway
 from book0_presentation.tables import (
     format_missing_ids_message,
+    format_page_footer,
     order_book_details_by_ids,
     render_author_table,
     render_book_details_table,
@@ -33,6 +36,17 @@ _SERVER_HELP = (
 )
 
 
+def _resolve_page_size(
+    cli_page_size: int | None, config_page_size: int | None
+) -> int | None:
+    candidate = cli_page_size if cli_page_size is not None else config_page_size
+    return candidate if candidate is not None and candidate > 0 else None
+
+
+def _resolve_page(cli_page: int | None) -> int:
+    return cli_page if cli_page is not None and cli_page > 0 else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="book0-remote")
     subparsers = parser.add_subparsers(dest="command")
@@ -40,14 +54,20 @@ def _build_parser() -> argparse.ArgumentParser:
     books_parser = subparsers.add_parser("books")
     books_parser.add_argument("--server", help=_SERVER_HELP)
     books_parser.add_argument("--tag")
+    books_parser.add_argument("--page", type=int, default=None)
+    books_parser.add_argument("--page-size", type=int, default=None)
 
     authors_parser = subparsers.add_parser("authors")
     authors_parser.add_argument("--server", help=_SERVER_HELP)
     authors_parser.add_argument("--tag")
+    authors_parser.add_argument("--page", type=int, default=None)
+    authors_parser.add_argument("--page-size", type=int, default=None)
 
     publishers_parser = subparsers.add_parser("publishers")
     publishers_parser.add_argument("--server", help=_SERVER_HELP)
     publishers_parser.add_argument("--tag")
+    publishers_parser.add_argument("--page", type=int, default=None)
+    publishers_parser.add_argument("--page-size", type=int, default=None)
 
     books_detail_parser = subparsers.add_parser("books-detail")
     books_detail_parser.add_argument(
@@ -116,18 +136,14 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
             if cache_dir is None:
                 cache_dir = xdg_cache_path()
 
-        gateway = HttpLibraryGateway(
+        gateway: LibraryGateway = HttpLibraryGateway(
             client,
             args.tag,
             with_covers=getattr(args, "with_covers", False),
             cache_dir=cache_dir,
         )
         try:
-            if args.command == "authors":
-                print(render_author_table(gateway.list_authors()))
-            elif args.command == "publishers":
-                print(render_publisher_table(gateway.list_publishers()))
-            elif args.command == "books-detail":
+            if args.command == "books-detail":
                 ids = (
                     [segment.strip() for segment in args.ids.split(",")]
                     if args.ids
@@ -140,7 +156,57 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
                 if missing_ids_message is not None:
                     print(missing_ids_message)
             else:
-                print(render_book_table(gateway.list_books()))
+                config_page_size = None
+                if args.page_size is None:
+                    page_size_config_path = find_config_file()
+                    if page_size_config_path is not None:
+                        try:
+                            config_page_size = load_default_page_size(
+                                page_size_config_path
+                            )
+                        except tomllib.TOMLDecodeError as error:
+                            print(
+                                f"Invalid book0-remote client config file "
+                                f"{page_size_config_path}: {error}",
+                                file=sys.stderr,
+                            )
+                            return 1
+                page_size = _resolve_page_size(args.page_size, config_page_size)
+                page = _resolve_page(args.page)
+
+                if args.command == "authors":
+                    if page_size is None:
+                        print(render_author_table(gateway.list_authors()))
+                    else:
+                        paged_authors = gateway.list_authors_page(page, page_size)
+                        print(render_author_table(list(paged_authors.items)))
+                        print(
+                            format_page_footer(
+                                paged_authors.page, paged_authors.total_pages
+                            )
+                        )
+                elif args.command == "publishers":
+                    if page_size is None:
+                        print(render_publisher_table(gateway.list_publishers()))
+                    else:
+                        paged_publishers = gateway.list_publishers_page(page, page_size)
+                        print(render_publisher_table(list(paged_publishers.items)))
+                        print(
+                            format_page_footer(
+                                paged_publishers.page, paged_publishers.total_pages
+                            )
+                        )
+                else:
+                    if page_size is None:
+                        print(render_book_table(gateway.list_books()))
+                    else:
+                        paged_books = gateway.list_books_page(page, page_size)
+                        print(render_book_table(list(paged_books.items)))
+                        print(
+                            format_page_footer(
+                                paged_books.page, paged_books.total_pages
+                            )
+                        )
         except (
             LibraryNotFoundError,
             NotACalibreLibraryError,

@@ -79,6 +79,7 @@ GOOD_OMENS_DETAILS = BookDetails(
     cover_path=None,
 )
 
+
 # Expected BookDetails with absolute cover_path values, computed from a library root.
 def _expected_details_with_cover(
     library_root: Path,
@@ -94,9 +95,7 @@ def _expected_details_with_cover(
             series=SeriesItem(
                 series=Series(id="1", name="Dune Chronicles"), index="1.0"
             ),
-            cover_path=str(
-                library_root / "Frank Herbert/Dune (1)/cover.jpg"
-            ),
+            cover_path=str(library_root / "Frank Herbert/Dune (1)/cover.jpg"),
         ),
         BookDetails(
             id="2",
@@ -116,9 +115,7 @@ def _expected_details_with_cover(
             tags=("fantasy", "humor"),
             publisher=Publisher(id="2", name="Gollancz"),
             series=None,
-            cover_path=str(
-                library_root / "Neil Gaiman/Good Omens (3)/cover.jpg"
-            ),
+            cover_path=str(library_root / "Neil Gaiman/Good Omens (3)/cover.jpg"),
         ),
     )
 
@@ -242,3 +239,53 @@ def expected_book_details(
 ) -> tuple[BookDetails, BookDetails, BookDetails]:
     """Expected BookDetails with absolute cover_path values for the fixture library."""
     return _expected_details_with_cover(calibre_metadata_db.parent)
+
+
+@pytest.fixture
+def many_books_db(tmp_path: Path) -> Path:
+    """7 books/authors/publishers, deliberately unlinked to each other - only counts
+    and title/name ordering matter for exercising pagination beyond a single page."""
+    db_path = tmp_path / "metadata.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE books (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                pubdate TEXT,
+                series_index REAL,
+                path TEXT,
+                has_cover INTEGER
+            );
+            CREATE TABLE authors (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE books_authors_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                author INTEGER NOT NULL
+            );
+            CREATE TABLE publishers (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            """
+        )
+        connection.executemany(
+            "INSERT INTO books (id, title) VALUES (?, ?)",
+            [(i, f"Book {i}") for i in range(1, 8)],
+        )
+        connection.executemany(
+            "INSERT INTO authors (id, name) VALUES (?, ?)",
+            [(i, f"Author {i}") for i in range(1, 8)],
+        )
+        connection.executemany(
+            "INSERT INTO publishers (id, name) VALUES (?, ?)",
+            [(i, f"Publisher {i}") for i in range(1, 8)],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return db_path

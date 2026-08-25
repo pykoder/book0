@@ -26,18 +26,6 @@ concrete; the commit or plan that resolves an item removes its line.
   same user-visible treatment an unknown id already gets today. Not implemented; explicitly
   scoped for later.
 
-- [ ] **`LibraryGateway` Protocol conformance is never statically checked.** Neither
-  `SqliteLibraryGateway` nor `HttpLibraryGateway` is ever assigned to a `LibraryGateway`-typed
-  variable anywhere in `src/`, and `uv run mypy src` never visits `tests/` (confirmed via
-  `mypy src --verbose`'s file list, twice, in two separate sessions) — so nothing catches
-  either implementation drifting from the Protocol. An earlier attempt added
-  `gateway: LibraryGateway = ...` annotations inside `tests/integration/test_sqlite_gateway.py`
-  and `test_http_gateway.py`; confirmed inert (never type-checked by the project's mandated
-  invocation), don't repeat that fix. Real fix: annotate the actual gateway construction site
-  as `LibraryGateway` inside `book0_cli/main.py`'s and `book0_cli_remote/main.py`'s `run()` —
-  that's what `mypy src` actually walks. Worth doing before or during the next
-  `LibraryGateway`-method-adding feature.
-
 - [ ] **(far future, undesigned) Multi-library support.** Identify a book by `(tag, id)`
   rather than a bare id, to support: a tag meaning a virtual library (a saved
   search/collection) rather than a physical one; a non-Calibre backend with its own native id
@@ -46,16 +34,13 @@ concrete; the commit or plan that resolves an item removes its line.
   to design the multi-library architecture itself — no design exists yet. Revisit via
   brainstorming when picked up.
 
-- [ ] **(undesigned) `books-detail` response projection + pagination.** Raised during
-  brainstorming for the id-normalization fix (2026-08-14) and deliberately split off rather
-  than folded in. The user's personal Calibre library can hold tens of thousands of books, so
-  `get_book_details`'s join cost genuinely matters, and a simple `--ids-only` boolean flag
-  isn't enough: concrete near-future needs include returning just found/missing ids, a book's
-  file path (possibly triggering a download), description/abstract text, and pagination over
-  large result sets — all without multiplying round-trips. Needs its own design: how a caller
-  specifies "which fields"/mode (fixed enum vs. open field-selection list), how pagination
-  composes with an `--ids`-scoped request, how a future file-path/download field and
-  description/abstract fit the same request/response shape, and whether real query-level
+- [ ] **(undesigned) `books-detail`'s own field projection.** The narrower remainder of the
+  old "`books-detail` response projection + pagination" item, after the
+  2026-08-20 list-pagination design absorbed and resolved the pagination half (paginate a
+  books/authors/publishers listing, then feed that page's ids into the existing
+  `get_book_details`/`--ids` flow). Still undesigned: an `--ids-only` mode, a future
+  file-path/download field, description/abstract text — how a caller specifies "which
+  fields"/mode (fixed enum vs. open field-selection list), and whether real query-level
   savings (skipping SQL joins per requested scope) requires forking `BookDetailsResult`'s
   shape or the `LibraryGateway` Protocol itself. No design exists yet; revisit via
   brainstorming when picked up.

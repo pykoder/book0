@@ -9,6 +9,7 @@ from book0_core.models import (
 )
 from book0_presentation.tables import (
     format_missing_ids_message,
+    format_page_footer,
     order_book_details_by_ids,
     render_author_table,
     render_book_details_table,
@@ -251,3 +252,15 @@ def test_format_missing_ids_message_returns_none_when_empty():
 
 def test_format_missing_ids_message_joins_ids():
     assert format_missing_ids_message(("1", "2")) == "Missing ids: 1, 2"
+
+
+def test_format_page_footer_shows_exact_total_pages():
+    assert format_page_footer(3, 12) == "Page 3 of 12"
+
+
+def test_format_page_footer_shows_many_when_total_pages_is_none():
+    assert format_page_footer(3, None) == "Page 3 of many"
+
+
+def test_format_page_footer_shows_zero_total_pages_for_an_empty_result():
+    assert format_page_footer(1, 0) == "Page 1 of 0"

@@ -3,6 +3,9 @@ from book0_api.schemas import (
     BookDetailsOut,
     BookDetailsResultOut,
     BookOut,
+    PagedAuthorsOut,
+    PagedBooksOut,
+    PagedPublishersOut,
     PublisherOut,
     SeriesItemOut,
     SeriesOut,
@@ -12,6 +15,9 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    PagedAuthorsResult,
+    PagedBooksResult,
+    PagedPublishersResult,
     Publisher,
     Series,
     SeriesItem,
@@ -142,4 +148,86 @@ def test_from_book_details_result_converts_books_and_missing_ids():
     assert result_out == BookDetailsResultOut(
         books=[BookDetailsOut.from_book_details(book_details)],
         missing_ids=["99"],
+    )
+
+
+def test_from_paged_result_converts_books_and_page_metadata():
+    book = Book(id="1", title="Dune", authors=("Frank Herbert",), pubdate="1965-08-01")
+    result = PagedBooksResult(
+        items=(book,),
+        page=2,
+        page_size=10,
+        total_pages=5,
+        has_more_than_shown=False,
+        handle="abc123",
+    )
+
+    paged_out = PagedBooksOut.from_paged_result(result)
+
+    assert paged_out == PagedBooksOut(
+        items=[BookOut.from_book(book)],
+        page=2,
+        page_size=10,
+        total_pages=5,
+        has_more_than_shown=False,
+    )
+
+
+def test_from_paged_result_keeps_none_total_pages():
+    result = PagedBooksResult(
+        items=(),
+        page=1,
+        page_size=10,
+        total_pages=None,
+        has_more_than_shown=True,
+        handle=None,
+    )
+
+    paged_out = PagedBooksOut.from_paged_result(result)
+
+    assert paged_out.total_pages is None
+    assert paged_out.has_more_than_shown is True
+
+
+def test_paged_authors_out_from_paged_result_converts_authors():
+    author = Author(id="1", name="Frank Herbert")
+    result = PagedAuthorsResult(
+        items=(author,),
+        page=1,
+        page_size=10,
+        total_pages=1,
+        has_more_than_shown=False,
+        handle=None,
+    )
+
+    paged_out = PagedAuthorsOut.from_paged_result(result)
+
+    assert paged_out == PagedAuthorsOut(
+        items=[AuthorOut.from_author(author)],
+        page=1,
+        page_size=10,
+        total_pages=1,
+        has_more_than_shown=False,
+    )
+
+
+def test_paged_publishers_out_from_paged_result_converts_publishers():
+    publisher = Publisher(id="1", name="Ace Books")
+    result = PagedPublishersResult(
+        items=(publisher,),
+        page=1,
+        page_size=10,
+        total_pages=1,
+        has_more_than_shown=False,
+        handle=None,
+    )
+
+    paged_out = PagedPublishersOut.from_paged_result(result)
+
+    assert paged_out == PagedPublishersOut(
+        items=[PublisherOut.from_publisher(publisher)],
+        page=1,
+        page_size=10,
+        total_pages=1,
+        has_more_than_shown=False,
     )

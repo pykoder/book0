@@ -1,9 +1,10 @@
 """Client-side config discovery/loading for `book0-remote`'s `--server` fallback.
 
 Reads `.book0-client.toml`, a personal/local file (gitignored, not committed) holding a
-`server = "http://host:port"` key (required) and an optional `cover-cache-dir = "/path"` key
-(falls back to an XDG cache directory when absent) - the schema may grow further, but no other
-key is designed yet.
+`server = "http://host:port"` key (required), an optional `cover-cache-dir = "/path"` key
+(falls back to an XDG cache directory when absent), and an optional
+`default-page-size = N` key (used only when `--page-size` is omitted) - the schema may grow
+further, but no other key is designed yet.
 """
 
 import os
@@ -50,3 +51,9 @@ def load_cover_cache_dir(config_path: Path) -> Path | None:
         data = tomllib.load(config_file)
     value = data.get("cover-cache-dir")
     return Path(value) if value is not None else None
+
+
+def load_default_page_size(config_path: Path) -> int | None:
+    with config_path.open("rb") as config_file:
+        data = tomllib.load(config_file)
+    return data.get("default-page-size")

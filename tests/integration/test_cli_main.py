@@ -517,3 +517,174 @@ def test_run_help_mentions_the_books_detail_subcommand(
 
     assert exc_info.value.code == 0
     assert "books-detail" in capsys.readouterr().out
+
+
+def test_run_paginates_books_when_page_size_flag_is_given(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", many_books_db)
+
+    exit_code = run(["--tag", "fiction", "--page-size", "2"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Book 1" in captured.out
+    assert "Book 3" not in captured.out
+    assert captured.out.strip().endswith("Page 1 of 4")
+
+
+def test_run_paginates_books_to_the_requested_page(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", many_books_db)
+
+    exit_code = run(["--tag", "fiction", "--page", "2", "--page-size", "2"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Book 3" in captured.out
+    assert "Book 5" not in captured.out
+    assert captured.out.strip().endswith("Page 2 of 4")
+
+
+def test_run_uses_config_default_page_size_when_flag_is_omitted(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    (tmp_path / ".book0.toml").write_text(
+        f'default-page-size = 2\n\n[libraries]\nfiction = "{many_books_db}"\n'
+    )
+
+    exit_code = run(["--tag", "fiction"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.strip().endswith("Page 1 of 4")
+
+
+def test_run_page_size_flag_overrides_config_default(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    (tmp_path / ".book0.toml").write_text(
+        f'default-page-size = 2\n\n[libraries]\nfiction = "{many_books_db}"\n'
+    )
+
+    exit_code = run(["--tag", "fiction", "--page-size", "5"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.strip().endswith("Page 1 of 2")
+
+
+def test_run_does_not_paginate_when_no_page_size_resolves(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", calibre_metadata_db)
+
+    exit_code = run(["--tag", "fiction", "--page", "2"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+
+
+def test_run_normalizes_non_positive_page_size_to_unpaginated(
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", calibre_metadata_db)
+
+    exit_code = run(["--tag", "fiction", "--page-size", "0"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
+
+
+def test_run_normalizes_non_positive_page_to_one(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", many_books_db)
+
+    exit_code = run(["--tag", "fiction", "--page", "-1", "--page-size", "2"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Book 1" in captured.out
+    assert captured.out.strip().endswith("Page 1 of 4")
+
+
+def test_run_paginates_authors(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", many_books_db)
+
+    exit_code = run(["authors", "--tag", "fiction", "--page-size", "2"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Author 1" in captured.out
+    assert captured.out.strip().endswith("Page 1 of 4")
+
+
+def test_run_paginates_publishers(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    _write_config(tmp_path / ".book0.toml", "fiction", many_books_db)
+
+    exit_code = run(["publishers", "--tag", "fiction", "--page-size", "2"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Publisher 1" in captured.out
+    assert captured.out.strip().endswith("Page 1 of 4")
