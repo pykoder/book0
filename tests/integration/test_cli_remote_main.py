@@ -20,8 +20,15 @@ from tests.conftest import (
 
 
 def test_run_prints_table_for_a_known_tag(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(["--server", "unused", "--tag", "fiction"], client=client)
@@ -68,8 +75,15 @@ def test_run_reports_unreachable_server_on_stderr_and_exits_with_status_1(
 
 
 def test_run_prints_author_table_for_a_known_tag(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -98,8 +112,15 @@ def test_run_reports_unknown_tag_on_stderr_for_authors_and_exits_with_status_1(
 
 
 def test_run_lists_books_when_subcommand_is_explicit(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(["books", "--server", "unused", "--tag", "fiction"], client=client)
@@ -119,8 +140,15 @@ def test_run_help_mentions_the_authors_subcommand(
 
 
 def test_run_prints_publisher_table_for_a_known_tag(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     client = TestClient(create_app({"fiction": calibre_metadata_db}))
 
     exit_code = run(
@@ -317,8 +345,15 @@ def test_run_help_mentions_the_books_detail_subcommand(
 
 
 def test_run_uses_server_side_default_tag_when_tag_is_omitted(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     client = TestClient(
         create_app({"fiction": calibre_metadata_db}, default_tag="fiction")
     )
@@ -553,8 +588,15 @@ def test_run_reports_error_for_invalid_page_size_config(
 
 
 def test_run_paginates_books_when_page_size_flag_is_given(
-    many_books_db: Path, capsys: pytest.CaptureFixture[str]
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     app = create_app({"fiction": many_books_db})
     client = TestClient(app)
 
@@ -631,8 +673,15 @@ def test_run_page_size_flag_overrides_client_config_default(
 
 
 def test_run_does_not_paginate_when_no_page_size_resolves(
-    calibre_metadata_db: Path, capsys: pytest.CaptureFixture[str]
+    calibre_metadata_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     app = create_app({"fiction": calibre_metadata_db})
     client = TestClient(app)
 
@@ -642,7 +691,16 @@ def test_run_does_not_paginate_when_no_page_size_resolves(
     assert capsys.readouterr().out == render_book_table(CALIBRE_LIBRARY_BOOKS) + "\n"
 
 
-def test_run_paginates_authors(many_books_db: Path, capsys: pytest.CaptureFixture[str]):
+def test_run_paginates_authors(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     app = create_app({"fiction": many_books_db})
     client = TestClient(app)
 
@@ -658,8 +716,15 @@ def test_run_paginates_authors(many_books_db: Path, capsys: pytest.CaptureFixtur
 
 
 def test_run_paginates_publishers(
-    many_books_db: Path, capsys: pytest.CaptureFixture[str]
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     app = create_app({"fiction": many_books_db})
     client = TestClient(app)
 
@@ -671,4 +736,27 @@ def test_run_paginates_publishers(
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "Publisher 1" in captured.out
+    assert captured.out.strip().endswith("Page 1 of 4")
+
+
+def test_run_page_size_flag_bypasses_invalid_book0_client_toml(
+    many_books_db: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    (tmp_path / ".book0-client.toml").write_text("not valid toml === \n")
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    exit_code = run(
+        ["--server", "unused", "--tag", "fiction", "--page-size", "2"], client=client
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
     assert captured.out.strip().endswith("Page 1 of 4")

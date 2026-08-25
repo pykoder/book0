@@ -156,17 +156,20 @@ def run(argv: list[str] | None = None, client: httpx.Client | None = None) -> in
                     print(missing_ids_message)
             else:
                 config_page_size = None
-                page_size_config_path = find_config_file()
-                if page_size_config_path is not None:
-                    try:
-                        config_page_size = load_default_page_size(page_size_config_path)
-                    except tomllib.TOMLDecodeError as error:
-                        print(
-                            f"Invalid book0-remote client config file "
-                            f"{page_size_config_path}: {error}",
-                            file=sys.stderr,
-                        )
-                        return 1
+                if args.page_size is None:
+                    page_size_config_path = find_config_file()
+                    if page_size_config_path is not None:
+                        try:
+                            config_page_size = load_default_page_size(
+                                page_size_config_path
+                            )
+                        except tomllib.TOMLDecodeError as error:
+                            print(
+                                f"Invalid book0-remote client config file "
+                                f"{page_size_config_path}: {error}",
+                                file=sys.stderr,
+                            )
+                            return 1
                 page_size = _resolve_page_size(args.page_size, config_page_size)
                 page = _resolve_page(args.page)
 
