@@ -44,3 +44,9 @@ concrete; the commit or plan that resolves an item removes its line.
   savings (skipping SQL joins per requested scope) requires forking `BookDetailsResult`'s
   shape or the `LibraryGateway` Protocol itself. No design exists yet; revisit via
   brainstorming when picked up.
+
+- [ ] **Scalar config keys (`default-library`, `default-page-size`, etc.) should live in a
+  `[general]` TOML section instead of floating at top level.** Right now they only parse
+  correctly if placed before any `[table]` header, since TOML folds anything written after one
+  into that table — hit exactly this way (2026-08-28) via `book0-api.toml`. Revisit via
+  brainstorming; affects `book0_config/config.py` and `book0_cli_remote/config.py`.
