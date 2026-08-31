@@ -376,14 +376,12 @@ class Job:
                                    #  failed: tuple[JobFailure, ...]}
 ```
 
-### 8.3 Schéma PG cible (spécification, côté calibre_pg_sync)
+### 8.3 Schéma PG cible
 
-- Tables miroir du schéma Calibre transposé existant (books, authors, publishers,
-  series, tags, languages, data/formats, ratings, comments) avec `library_uuid` +
-  `local_id` (déjà en place dans calibre_pg_sync) + `base_path` par bibliothèque.
-- Nouvelle table `jobs` : `id (uuid)`, `library_uuid`, `action`, `status`,
-  `params (jsonb)`, `outcome (jsonb)`, `created_at`, `started_at`, `finished_at`.
-- `PgLibraryGateway` ne lit/écrit que ce schéma ; il ne touche jamais `metadata.db`.
+Le schéma PostgreSQL cible (tables miroir Calibre, table `jobs`, `base_path` par
+bibliothèque) est spécifié dans un document séparé :
+`2026-08-31-grimoire-pg-schema-design.md`. `PgLibraryGateway` ne lit/écrit que ce
+schéma ; il ne touche jamais `metadata.db`.
 
 ## 9. Erreurs et mapping HTTP
 
