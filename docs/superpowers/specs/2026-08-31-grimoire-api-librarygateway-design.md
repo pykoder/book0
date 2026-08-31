@@ -124,13 +124,17 @@ Nouveaux résultats paginés : `PagedSeriesResult` (même forme que
 
 Tous les paramètres de filtre acceptent une valeur compacte :
 
-- `v` : valeur exacte — `?rating=4`, `?author_id=12`
-- `v1,v2,...` : liste, OU logique intra-clé — `?tag=classique,science-fiction`
-- `a-b` : intervalle inclusif (champs comparables uniquement : `rating`,
-  `author_id`, `publisher_id`, `series_id`, `pubdate` sur l'année) — `?rating=3-5`,
+- `v` : valeur exacte — `?ratings=4`, `?author_id=12`
+- `v1,v2,...` : liste, OU logique intra-clé — `?tags=classique,science-fiction`
+- `a-b` : intervalle inclusif (champs comparables uniquement : `ratings`,
+  `author_id`, `publisher_id`, `series_id`, `pubdate` sur l'année) — `?ratings=3-5`,
   `?pubdate=2000-2005`
-- Combinaison libre : `?rating=1,3-5`
-- ET logique **entre** clés : `?author_id=3&tag=classique&language=fr`
+- Combinaison libre : `?ratings=1,3-5`
+- ET logique **entre** clés : `?author_id=3&tags=classique&languages=fr`
+
+Nommage : les filtres à valeurs texte/numériques portent le **pluriel**
+(`tags`, `languages`, `formats`, `ratings`) pour ne pas entrer en collision avec
+le paramètre `tag` existant, qui sélectionne la bibliothèque sur toutes les routes.
 
 Règles de validation (sinon 422 `InvalidFilterError`) :
 - un intervalle n'est permis que sur un champ comparable ;
@@ -179,7 +183,7 @@ Applicables à `GET /libraries/books` (et, pour la navigation en cascade gauche 
 centre, aux autres listes : `GET /libraries/authors?series_id=7` = auteurs de la
 série 7, etc.). Voir §5 pour la syntaxe.
 
-Exemple : `GET /libraries/books?tag=classique&rating=4-5&sort=pubdate&order=desc&page=2&page_size=50`
+Exemple : `GET /libraries/books?tags=classique&ratings=4-5&sort=pubdate&order=desc&page=2&page_size=50`
 
 ### 6.3 Valeurs possibles d'une propriété (facettes)
 
