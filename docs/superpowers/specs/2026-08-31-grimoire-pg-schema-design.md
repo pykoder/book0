@@ -38,7 +38,28 @@ books_* uniquement) pour le PATCH d'édition en masse.
 Contraintes : `outcome` non null ssi `status ∈ {done, failed}` ; index sur
 (`library_uuid`, `status`, `created_at`) pour `GET /libraries/jobs`.
 
-## 3. Règles
+## 3. Groupes d'alias d'auteurs (nouveau)
+
+Groupage explicite des lignes auteur désignant la même personne (graphies, fautes
+de frappe, alias) — voir spec API §7.3 :
+
+| Table | Colonnes | Notes |
+|---|---|---|
+| `author_entity` | `id (uuid) PK`, `library_uuid`, `display_author_id` (FK authors, NULL) | le groupe ; forme d'affichage choisie parmi les membres (optionnelle) |
+| `author_entity_member` | `entity_id (FK)`, `author_id (FK authors)`, PK (`entity_id`, `author_id`) | appartenance au groupe |
+
+Règles :
+- L'association est **explicite** : aucune inférence par égalité de nom. Deux
+  auteurs homonymes non associés restent des personnes distinctes.
+- Un auteur appartient à au plus un groupe (`author_id` unique dans
+  `author_entity_member`) ; l'association de deux auteurs de groupes distincts
+  fusionne les groupes (une transaction).
+- Les filtres `author_id` (spec API §6.2) sont alias-aware : jointure sur les
+  membres du groupe.
+- Les lignes auteur restent celles de Calibre (miroir sync) : le groupage PG est
+  une donnée locale, non envoyée vers `metadata.db`.
+
+## 4. Règles
 
 - `PgLibraryGateway` ne lit/écrit que ce schéma ; il ne touche jamais `metadata.db`.
 - Les écritures de métadonnées (PATCH) vivent dans la même transaction que la
@@ -49,7 +70,7 @@ Contraintes : `outcome` non null ssi `status ∈ {done, failed}` ; index sur
   modifiées via l'API : stratégie de conflit hors périmètre de ce document (voir
   points ouverts de la spec API).
 
-## 4. Out of scope
+## 5. Out of scope
 
 - Migration/versionnage du schéma (aucun outil de migration dans book0 ;
   calibre_pg_sync crée le schéma à l'import — le choix d'un outil type Alembic

@@ -222,6 +222,13 @@ GET /libraries/books/{id}/content?level=7&extract=1.2...1.4-
 
 ## 7. Routes d'écriture
 
+**Convention `dry_run`** : toute route d'écriture acceptant `dry_run=true` exécute
+la validation complète (regexp, appartenance aux groupes, ids inconnus…) puis
+renvoie **exactement la réponse d'une exécution réelle** — mêmes code HTTP, mêmes
+corps et champs, calculés sur les données réelles — **sans modifier les données**.
+Cette convention s'applique à toute future route d'écriture qui gagne un
+`dry_run`. Erreurs de validation : identiques en dry_run et en exécution réelle.
+
 ### 7.1 Édition en masse (synchrone)
 
 ```
@@ -231,7 +238,8 @@ Body : { "ids": ["42", "17"],
                     "tags": ["fantasy", "classique"],
                     "series_id": "7", "series_index": "1.0",
                     "rating": 4, "pubdate": "2001-08-02",
-                    "language": "fr", "comments": "..." } }
+                    "language": "fr", "comments": "..." },
+         "dry_run": false }
 → 200 { "updated": ["42", "17"], "missing_ids": [] }
 ```
 
@@ -239,11 +247,14 @@ Body : { "ids": ["42", "17"],
   appliqués ; les absents restent inchangés.
 - Transactionnelle : tout réussit ou rien (les ids inconnus ne font pas échouer,
   ils remontent dans `missing_ids`).
+- `dry_run=true` : `updated` liste ce qui serait modifié, rien n'est écrit (voir
+  convention en tête de §7).
 - `ids` vide ou `patch` vide → 422 `InvalidPatchError`.
 - Pas de PATCH unitaire distinct : un seul id couvre le livre courant.
 - Champs modifiables : `publisher_id`, `series_id`, `series_index`, `tags`
-  (remplace la liste), `rating`, `pubdate`, `language`, `comments`. (Titre et
-  auteurs hors périmètre initial — voir « Out of scope ».)
+  (remplace la liste), `rating`, `pubdate`, `language`, `comments`. Titre hors
+  périmètre ; **les auteurs ne passent pas par ce PATCH** — leur correction en
+  masse a ses propres routes (§7.3).
 
 ### 7.2 Tâches de fond et comptes rendus
 
@@ -278,6 +289,63 @@ GET /libraries/jobs/{id}                               → détail + compte rend
 - `status` ∈ `pending | running | done | failed | interrupted`.
 - Pas de suppression ni de relance de job dans cette version (consultation seule).
 - Erreurs : 404 `UnknownJobError`, 422 `UnknownJobActionError`.
+
+### 7.3 Auteurs : groupes d'alias et correction en masse des noms
+
+Motivation : corriger en masse les graphies d'un même auteur (fautes de frappe,
+normalisation, alias déclarés) sans toucher les autres auteurs d'un livre, avec
+des garde-fous. Un livre peut avoir plusieurs auteurs ; la correction ne s'applique
+qu'à la forme ciblée.
+
+#### Modèle
+
+- Chaque forme de nom est une ligne auteur (ids Calibre conservés) ; un **groupe
+  d'alias** est une association **explicite par ids** (jamais par égalité de nom).
+- **Homonymes** : deux auteurs portant le même nom restent deux personnes
+  distinctes tant qu'ils n'ont pas été explicitement associés ; l'UI lève
+  l'ambiguïté par l'id (« John Smith (#12) » vs « John Smith (#34) ») quand le
+  groupe en contient.
+- Filtres **alias-aware** : `author_id=3` sélectionne les livres de toutes les
+  formes du groupe de 3 (lecture seule, §6.2).
+- Le schéma PG (doc dédié) porte la table d'entités d'alias.
+
+#### Routes de gestion des alias (page auteur)
+
+```
+GET    /libraries/authors/{id}/aliases              → { "group": ["12", "45", "78"],
+                                                       "names": { "12": "Herbert, Frank", ... } }
+POST   /libraries/authors/{id}/aliases              → { "alias_id": "45" }   (associe ; fusionne
+                                                       les deux groupes si alias_id en a déjà un)
+DELETE /libraries/authors/{id}/aliases/{alias_id}   → dissocie (l'auteur reste, sort du groupe)
+```
+
+Erreurs : 404 `AuthorNotFoundError` (id inconnu), 422 `InvalidAliasError`
+(auto-association id==alias_id).
+
+#### Correction en masse : `POST /libraries/authors/{id}/apply-name`
+
+```
+POST /libraries/authors/{id}/apply-name?tag=...
+Body : { "match": "^Herbet, Frank$",           // regexp OBLIGATOIRE (garde-fou)
+         "target": { "author_id": "45" },       // ou { "name": "Herbert, Frank" }
+         "book_ids": ["42", "17"],              // optionnel ; défaut = tous les livres de l'auteur id
+         "dry_run": false }
+→ 200 { "applied": ["42", "17"], "skipped": [], "missing_ids": [] }
+```
+
+- Le regexp `match` est vérifié contre le **nom actuel** de l'auteur `id` avant
+  toute écriture ; non-correspondance → 422 `AuthorNameMismatchError`, rien n'est
+  modifié (protection contre une re-sync survenue entre-temps).
+- `target.author_id` : les livres repointent vers la ligne auteur existante, qui
+  doit appartenir au **même groupe** d'alias (sinon 422 `InvalidAliasError`).
+- `target.name` : crée (ou réutilise) la ligne auteur portant ce nom, l'ajoute au
+  groupe, puis repointe les livres.
+- **Multi-auteurs** : la correction remplace uniquement l'auteur `id` dans la
+  liste d'auteurs de chaque livre ciblé, jamais les autres.
+- `dry_run=true` : même réponse (aperçu de `applied`/`skipped`), aucune écriture.
+- Erreurs : 404 `AuthorNotFoundError`, 422 `AuthorNameMismatchError`,
+  422 `InvalidAliasError`, 422 `InvalidApplyNameError` (regexp invalide, target
+  absent/invalide, book_ids vide).
 
 ## 8. Spécification des Protocols (`book0_core`)
 
@@ -326,13 +394,19 @@ Implémenté uniquement par `PgLibraryGateway` :
 
 ```python
 class MutableCatalogGateway(Protocol):
-    def edit_books(self, ids: list[str], patch: BookPatch) -> EditBooksResult: ...
+    def edit_books(self, ids: list[str], patch: BookPatch,
+                   dry_run: bool = False) -> EditBooksResult: ...
     def get_book_content(self, book_id: str, level: int,
                          extract: str | None) -> BookContent: ...
     def create_job(self, request: JobRequest) -> Job: ...
     def get_job(self, job_id: str) -> Job | None: ...
     def list_jobs_page(self, status: JobStatus | None, action: JobAction | None,
                        page: int, page_size: int) -> PagedJobsResult: ...
+    def get_author_aliases(self, author_id: str) -> AuthorAliasGroup: ...
+    def add_author_alias(self, author_id: str, alias_id: str) -> AuthorAliasGroup: ...
+    def remove_author_alias(self, author_id: str, alias_id: str) -> AuthorAliasGroup: ...
+    def apply_author_name(self, author_id: str,
+                          request: ApplyNameRequest) -> ApplyNameResult: ...
 ```
 
 ```python
@@ -378,6 +452,29 @@ class Job:
     finished_at: str | None
     outcome: JobOutcome | None     # {succeeded: tuple[str,...],
                                    #  failed: tuple[JobFailure, ...]}
+
+@dataclass(frozen=True)
+class AuthorAliasGroup:
+    author_id: str                          # l'id interrogé
+    group: tuple[str, ...]                  # ids du groupe, author_id inclus
+    names: Mapping[str, str]                # id → nom actuel
+
+class NameTarget:                           # union discriminée
+    pass                                    # NameTargetById(author_id: str)
+                                            # NameTargetByName(name: str)
+
+@dataclass(frozen=True)
+class ApplyNameRequest:
+    match: str                              # regexp obligatoire
+    target: NameTarget
+    book_ids: tuple[str, ...] = ()          # vide = tous les livres de l'auteur
+    dry_run: bool = False
+
+@dataclass(frozen=True)
+class ApplyNameResult:
+    applied: tuple[str, ...]
+    skipped: tuple[str, ...]
+    missing_ids: tuple[str, ...]
 ```
 
 ### 8.3 Schéma PG cible
@@ -401,6 +498,10 @@ schéma ; il ne touche jamais `metadata.db`.
 | `InvalidPatchError` | 422 | corps PATCH invalide/vides |
 | `UnknownJobError` | 404 | id de job inconnu |
 | `UnknownJobActionError` | 422 | action de job hors énumération |
+| `AuthorNotFoundError` | 404 | id d'auteur inconnu (routes §7.3) |
+| `AuthorNameMismatchError` | 422 | regexp `match` non vérifiée sur le nom actuel |
+| `InvalidAliasError` | 422 | auto-association ; cible hors du groupe d'alias |
+| `InvalidApplyNameError` | 422 | regexp invalide, target absent/invalide, book_ids vide |
 
 Corps d'erreur identique à l'existant : `{"error": "<ClassName>", "detail": "..."}`.
 `HttpLibraryGateway` (et son homologue PG éventuel) reconstruit la même exception
@@ -421,12 +522,14 @@ côté client — la substituabilité des gateways reste la règle.
 
 ## 11. Impact jaquette
 
-- `api/` : nouveaux appels (series, values, content, PATCH, jobs) + types
-  régénérés.
+- `api/` : nouveaux appels (series, values, content, PATCH, jobs, aliases,
+  apply-name) + types régénérés.
 - Écrans : navigation série dans la colonne gauche ; bascule liste/grille au
   centre (même endpoint) ; onglet méta-données/contenu à droite avec la ligne de
   filtrage markdown (`extract`) ; panneau d'édition en masse sur la sélection ;
-  vue des jobs/comptes rendus.
+  vue des jobs/comptes rendus ; **page auteur dédiée** (gestion des groupes
+  d'alias, correction de graphie en masse avec aperçu dry_run) ; désambiguïsation
+  des homonymes par id.
 - La sélection, la pagination et le livre courant restent de l'état client
   (aucune route de « sélection persistée »).
 
@@ -435,7 +538,9 @@ côté client — la substituabilité des gateways reste la règle.
 - Sync bidirectionnelle retour vers Calibre ; résolution des conflits de re-sync.
 - Syntaxe de recherche Calibre (`search=...`) — un paramètre pourra s'ajouter
   sans casser les filtres structurés.
-- Édition du titre et des auteurs en masse.
+- Édition du titre en masse (les auteurs ont leurs routes dédiées, §7.3).
+- Suppression/fusion définitive de lignes auteur orphelines après correction
+  (les formes devenues inutilisées restent dans le groupe d'alias).
 - Authentification, quotas, multi-utilisateurs.
 - Suppression/relance de jobs, notifications temps réel (polling suffira).
 - Extension des facettes aux commentaires et ISBN.
