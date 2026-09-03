@@ -5,12 +5,15 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    BookQuery,
+    BookSort,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
     Publisher,
     Series,
     SeriesItem,
+    SortOrder,
 )
 
 
@@ -244,3 +247,20 @@ def test_paged_publishers_result_holds_items_and_page_metadata():
 
     assert result.items == (Publisher(id="1", name="Ace Books"),)
     assert result.total_pages == 1
+
+
+def test_book_nouveaux_champs_optionnels():
+    b = Book(id="1", title="T", authors=("A",), pubdate=None)
+    assert b.publisher is None and b.series is None
+    assert b.series_index is None and b.rating is None and b.has_cover is False
+
+
+def test_book_query_defaut_vide():
+    q = BookQuery()
+    assert q.author_ids == () and q.ratings == ()
+    assert q.sort is BookSort.TITLE and q.order is SortOrder.ASC
+
+
+def test_book_sort_valeurs():
+    assert BookSort("series_index") is BookSort.SERIES_INDEX
+    assert SortOrder("desc") is SortOrder.DESC

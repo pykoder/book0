@@ -1,13 +1,6 @@
 from dataclasses import dataclass
+from enum import Enum
 from typing import Literal
-
-
-@dataclass(frozen=True)
-class Book:
-    id: str
-    title: str
-    authors: tuple[str, ...]
-    pubdate: str | None
 
 
 @dataclass(frozen=True)
@@ -26,6 +19,19 @@ class Publisher:
 class Series:
     id: str
     name: str
+
+
+@dataclass(frozen=True)
+class Book:
+    id: str
+    title: str
+    authors: tuple[str, ...]
+    pubdate: str | None
+    publisher: Publisher | None = None
+    series: Series | None = None
+    series_index: str | None = None
+    rating: int | None = None
+    has_cover: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,6 +81,51 @@ class PagedAuthorsResult:
 @dataclass(frozen=True)
 class PagedPublishersResult:
     items: tuple[Publisher, ...]
+    page: int
+    page_size: int
+    total_pages: int | None
+    has_more_than_shown: bool
+    handle: str | None
+
+
+class BookSort(Enum):
+    TITLE = "title"
+    PUBDATE = "pubdate"
+    PUBLISHER = "publisher"
+    SERIES = "series"
+    SERIES_INDEX = "series_index"
+    RATING = "rating"
+    AUTHOR = "author"
+
+
+class SortOrder(Enum):
+    ASC = "asc"
+    DESC = "desc"
+
+
+@dataclass(frozen=True)
+class BookQuery:
+    author_ids: tuple[str, ...] = ()
+    publisher_ids: tuple[str, ...] = ()
+    series_ids: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
+    languages: tuple[str, ...] = ()
+    formats: tuple[str, ...] = ()
+    ratings: tuple[int, ...] = ()
+    pubdate_years: tuple[int, ...] = ()
+    sort: BookSort = BookSort.TITLE
+    order: SortOrder = SortOrder.ASC
+
+
+@dataclass(frozen=True)
+class FieldValue:
+    value: str
+    count: int
+
+
+@dataclass(frozen=True)
+class PagedSeriesResult:
+    items: tuple[Series, ...]
     page: int
     page_size: int
     total_pages: int | None
