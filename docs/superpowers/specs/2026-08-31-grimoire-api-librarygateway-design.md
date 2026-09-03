@@ -39,7 +39,7 @@ Fonctionnalités visées (source : `specs-api.md` à la racine de Grimoire) :
 | Support des écritures | PostgreSQL via `calibre_pg_sync` — PG devient le catalogue principal de l'API |
 | Sync retour vers Calibre | Non. Calibre reste une source d'import/sync à sens unique dans cette version |
 | Service | `book0_api` évolue : mêmes principes, routes existantes conservées et étendues |
-| Protocols | Deux Protocols (`ReadLibraryGateway`, `MutableCatalogGateway`), une seule implémentation PG qui les réalise tous les deux. Lecture et écriture visent la même base PG |
+| Protocols | Deux Protocols (`ReadLibraryGateway`, `MutableLibraryGateway`), une seule implémentation PG qui les réalise tous les deux. Lecture et écriture visent la même base PG |
 | `metadata.db` | Reste strictement read-only ; `SqliteLibraryGateway` n'implémente que la partie lecture, pour les CLIs existants |
 | Fichiers (EPUB, couvertures) | Restent sur disque (répertoires Calibre), localisés via `base_path` enregistré en PG à l'import |
 | Markdown | Conversion serveur (epub2md intégré à `book0_api`, avec cache disque) + extraction serveur |
@@ -55,7 +55,7 @@ jaquette (React) ──HTTP──> book0_api (FastAPI) ──> Protocols book0_c
                                                      ├── ReadLibraryGateway
                                                      │     ├── SqliteLibraryGateway (CLIs)
                                                      │     └── PgLibraryGateway
-                                                     └── MutableCatalogGateway
+                                                     └── MutableLibraryGateway
                                                            └── PgLibraryGateway (seule impl.)
 
 calibre_pg_sync ──import/sync──> PostgreSQL   <── jobs, rapports, cache markdown
@@ -209,7 +209,7 @@ GET /libraries/books/{id}/content?level=7&extract=1.2...1.4-
 ```
 
 - Conversion par `epub2md` (dépendance de paquet, pas un sous-processus),
-  appelée par l'implémentation PG de `MutableCatalogGateway.get_book_content`
+  appelée par l'implémentation PG de `MutableLibraryGateway.get_book_content`
   (§8.2) — aucune autre partie du code n'importe epub2md. L'EPUB est localisé
   sur disque via `base_path` + conventions Calibre
   (`author/series/book (id)/book.epub`).
@@ -388,12 +388,12 @@ class ReadLibraryGateway(Protocol):
 - Les variantes `query_{authors,publishers,series}_page` renvoient les entités
   participant aux livres filtrés (navigation en cascade).
 
-### 8.2 `MutableCatalogGateway`
+### 8.2 `MutableLibraryGateway`
 
 Implémenté uniquement par `PgLibraryGateway` :
 
 ```python
-class MutableCatalogGateway(Protocol):
+class MutableLibraryGateway(Protocol):
     def edit_books(self, ids: list[str], patch: BookPatch,
                    dry_run: bool = False) -> EditBooksResult: ...
     def get_book_content(self, book_id: str, level: int,
