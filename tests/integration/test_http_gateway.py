@@ -13,7 +13,7 @@ from book0_core.errors import (
     NotACalibreLibraryError,
     TagRequiredError,
 )
-from book0_core.gateway import LibraryGateway
+from book0_core.gateway import ReadLibraryGateway
 from book0_core.models import (
     BookDetails,
     PagedAuthorsResult,
@@ -170,7 +170,7 @@ def test_http_gateway_satisfies_the_library_gateway_protocol(
     calibre_metadata_db: Path,
 ):
     client = _client_for({"fiction": calibre_metadata_db})
-    gateway: LibraryGateway = HttpLibraryGateway(client, "fiction")
+    gateway: ReadLibraryGateway = HttpLibraryGateway(client, "fiction")
 
     assert gateway.list_publishers() == CALIBRE_LIBRARY_PUBLISHERS
 

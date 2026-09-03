@@ -9,7 +9,7 @@ from book0_core.errors import (
     NotACalibreLibraryError,
     TagRequiredError,
 )
-from book0_core.gateway import LibraryGateway
+from book0_core.gateway import ReadLibraryGateway
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 from book0_presentation.tables import (
     format_missing_ids_message,
@@ -105,7 +105,7 @@ def run(argv: list[str] | None = None) -> int:
         if library_path is None:
             raise TagRequiredError(f"Unknown library tag: {tag!r}")
 
-        gateway: LibraryGateway = SqliteLibraryGateway(library_path)
+        gateway: ReadLibraryGateway = SqliteLibraryGateway(library_path)
 
         if args.command == "books-detail":
             ids = (
