@@ -4,9 +4,20 @@ from typing import Literal
 import httpx
 
 from book0_core.errors import (
+    AuthorNameMismatchError,
+    AuthorNotFoundError,
+    BookNotFoundError,
+    InvalidAliasError,
+    InvalidApplyNameError,
+    InvalidExtractError,
+    InvalidFilterError,
+    InvalidPatchError,
     LibraryNotFoundError,
+    NoEpubError,
     NotACalibreLibraryError,
     TagRequiredError,
+    UnknownJobActionError,
+    UnknownJobError,
 )
 from book0_core.models import (
     Author,
@@ -25,6 +36,17 @@ _ERROR_TYPES = {
     "LibraryNotFoundError": LibraryNotFoundError,
     "NotACalibreLibraryError": NotACalibreLibraryError,
     "TagRequiredError": TagRequiredError,
+    "BookNotFoundError": BookNotFoundError,
+    "NoEpubError": NoEpubError,
+    "InvalidExtractError": InvalidExtractError,
+    "InvalidFilterError": InvalidFilterError,
+    "InvalidPatchError": InvalidPatchError,
+    "UnknownJobError": UnknownJobError,
+    "UnknownJobActionError": UnknownJobActionError,
+    "AuthorNotFoundError": AuthorNotFoundError,
+    "AuthorNameMismatchError": AuthorNameMismatchError,
+    "InvalidAliasError": InvalidAliasError,
+    "InvalidApplyNameError": InvalidApplyNameError,
 }
 
 
