@@ -838,3 +838,43 @@ def pg_library(pg_dsn, pg_schema, pg_library_root: Path) -> str:
         )
     conn.commit()
     return pg_dsn
+
+
+@pytest.fixture
+def pg_library_with_sentinel_pubdate(pg_library):
+    """pg_library + un 4e livre à pubdate sentinelle Calibre (année 101).
+
+    Calibre encode « pas de date de publication » comme la sentinelle
+    calibre.utils.date.UNDEFINED_DATE (an 101) et non comme NULL : _PUBDATE_SQL
+    doit la neutraliser exactement comme un vrai NULL. Fixture dérivée pour ne
+    pas désynchroniser pg_library du seed SQLite que les listes attendues
+    (CALIBRE_LIBRARY_*) partagent entre les deux backends.
+    """
+    conn = psycopg.connect(pg_library)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO books (library_uuid, local_id, uuid, title, title_sort,"
+                " author_sort, pubdate, timestamp, last_modified, series_index, path,"
+                " flags, has_cover)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    GRIMOIRE_TEST_LIBRARY_UUID,
+                    4,
+                    "uuid-book-4",
+                    "Sentinel Book",
+                    "Sentinel Book",
+                    "Unknown, Author",
+                    datetime(101, 1, 1, tzinfo=UTC),  # sentinelle Calibre an 101
+                    datetime(2024, 1, 1, tzinfo=UTC),
+                    datetime(2024, 1, 1, tzinfo=UTC),
+                    None,
+                    "Unknown/Sentinel Book (4)/",
+                    1,
+                    False,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return pg_library

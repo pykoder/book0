@@ -36,4 +36,9 @@ work = "${WORK_LIBRARY_PATH}"
 # catalog (calibre_pg_sync schema) instead of the SQLite metadata.db paths
 # above - the tag resolves to libraries.name and the `libraries` mapping is
 # ignored. Leave commented to keep serving SQLite files.
+#
+# Known, documented divergence between the two backends: an unknown tag is
+# reported as 400 TagRequiredError in SQLite mode, but as 404
+# LibraryNotFoundError in PG mode (the tag resolves against libraries.name).
+# Deliberate - do not rely on the status code to detect an unknown tag.
 # pg-dsn = "postgresql://postgres:…@localhost:5432/grimoire"

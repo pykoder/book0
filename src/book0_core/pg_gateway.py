@@ -498,7 +498,11 @@ class PgLibraryGateway:
     ) -> PagedBooksResult:
         params: list[object] = [self._library_uuid]
         where = _query_books_where(query, params, self._library_uuid)
-        direction = " DESC NULLS LAST" if query.order is SortOrder.DESC else ""
+        # Alignement SQLite : ASC place les NULL en premier (d'où NULLS FIRST
+        # explicite, le défaut PG étant NULLS LAST), DESC les garde en dernier.
+        direction = (
+            " DESC NULLS LAST" if query.order is SortOrder.DESC else " ASC NULLS FIRST"
+        )
         order_by = _SORT_EXPRESSIONS[query.sort] + direction
         page_sql = (
             _LIST_BOOKS_QUERY_JOINS

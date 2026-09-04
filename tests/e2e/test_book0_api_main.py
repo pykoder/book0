@@ -381,6 +381,19 @@ def test_list_series_accepts_the_whitelisted_name_sort(calibre_metadata_db: Path
     ]
 
 
+def test_list_series_rejects_desc_order_with_a_422(calibre_metadata_db: Path):
+    # La route ne sait trier qu'en asc (ORDER BY name fixe des passerelles) :
+    # desc doit être rejeté par la validation FastAPI, pas accepté puis ignoré.
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/series", params={"tag": "fiction", "sort": "name", "order": "desc"}
+    )
+
+    assert response.status_code == 422
+
+
 def test_get_book_details_returns_expected_details_for_a_known_tag(
     calibre_metadata_db: Path,
 ):

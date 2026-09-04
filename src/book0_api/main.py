@@ -470,12 +470,14 @@ def create_app(
         ratings: str | None = None,
         pubdate: str | None = None,
         sort: Literal["name"] | None = None,
-        order: Literal["asc", "desc"] | None = None,
+        order: Literal["asc"] | None = None,
     ) -> list[SeriesOut] | PagedSeriesOut | JSONResponse:
         # Sort whitelist: "name" only, default name,asc - which is exactly what
         # list_series' and query_series_page's fixed ORDER BY name already
         # produce, so sort/order need no SQL-side handling until a second sort
-        # key exists.
+        # key exists. "desc" is deliberately absent from the Literal until a
+        # gateway honors a directional ORDER BY: FastAPI answers 422 rather
+        # than silently accepting and ignoring it.
         try:
             gateway = _resolve_gateway(tag)
         except TagRequiredError as error:

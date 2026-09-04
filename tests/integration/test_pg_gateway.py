@@ -259,6 +259,33 @@ def test_pg_query_books_sorts_by_pubdate_desc_with_nulls_last(pg_library):
     ]
 
 
+def test_pg_pubdate_sentinelle_calibre_est_neutralisee_en_null(
+    pg_library_with_sentinel_pubdate,
+):
+    # La CASE de _PUBDATE_SQL (an 101 -> NULL) : la sentinelle Calibre
+    # (calibre.utils.date.UNDEFINED_DATE) doit sortir comme un vrai NULL.
+    gw = PgLibraryGateway(pg_library_with_sentinel_pubdate, "grimoire-test")
+
+    books = {b.title: b for b in gw.list_books()}
+
+    assert books["Sentinel Book"].pubdate is None
+
+
+def test_pg_query_books_sorts_by_pubdate_asc_with_nulls_first(pg_library):
+    # SQLite place les NULL en PREMIER en ASC ; PG les met en DERNIER par
+    # défaut. Le ORDER BY de la passerelle doit forcer NULLS FIRST pour
+    # rester aligné sur la sémantique SQLite (desc garde NULLS LAST).
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    result = gw.query_books_page(BookQuery(sort=BookSort.PUBDATE), 1, 100)
+
+    assert [b.title for b in result.items] == [
+        "The Hobbit",  # NULL pubdate -> premier, sémantique SQLite ASC
+        "Dune",  # 1965
+        "Good Omens",  # 1990
+    ]
+
+
 def test_pg_query_books_sorts_by_author_sort_desc(pg_library):
     # The PG schema's books table HAS an author_sort column, so the AUTHOR sort
     # key is real here (unlike the SQLite fixture, which lacks the column).
