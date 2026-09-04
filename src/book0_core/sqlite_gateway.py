@@ -4,6 +4,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.models import (
@@ -24,10 +25,23 @@ _LIST_BOOKS_QUERY = """
         books.id,
         books.title,
         GROUP_CONCAT(authors.name, ', ') AS authors,
-        books.pubdate
+        books.pubdate,
+        publishers.id AS publisher_id,
+        publishers.name AS publisher_name,
+        series.id AS series_id,
+        series.name AS series_name,
+        books.series_index,
+        ratings.rating AS rating_raw,
+        books.has_cover
     FROM books
     LEFT JOIN books_authors_link ON books_authors_link.book = books.id
     LEFT JOIN authors ON authors.id = books_authors_link.author
+    LEFT JOIN books_publishers_link ON books_publishers_link.book = books.id
+    LEFT JOIN publishers ON publishers.id = books_publishers_link.publisher
+    LEFT JOIN books_series_link ON books_series_link.book = books.id
+    LEFT JOIN series ON series.id = books_series_link.series
+    LEFT JOIN books_ratings_link ON books_ratings_link.book = books.id
+    LEFT JOIN ratings ON ratings.id = books_ratings_link.rating
     GROUP BY books.id
     ORDER BY books.title
 """
@@ -125,15 +139,34 @@ class SqliteLibraryGateway:
         connection = self._connect()
         rows = connection.execute(_LIST_BOOKS_QUERY).fetchall()
 
-        return [
-            Book(
-                id=str(row[0]),
-                title=row[1],
-                authors=tuple(row[2].split(", ")) if row[2] else (),
-                pubdate=self._normalize_pubdate(row[3]),
-            )
-            for row in rows
-        ]
+        return [self._book_from_row(row) for row in rows]
+
+    @staticmethod
+    def _book_from_row(row: tuple[object, ...]) -> Book:
+        # Row layout (see _LIST_BOOKS_QUERY): id, title, authors, pubdate,
+        # publisher_id, publisher_name, series_id, series_name, series_index,
+        # rating_raw, has_cover.
+        rating_raw = cast("int | None", row[9])
+        rating = (rating_raw // 2 or None) if rating_raw is not None else None
+        return Book(
+            id=str(row[0]),
+            title=row[1],  # type: ignore[arg-type]
+            authors=tuple(row[2].split(", ")) if row[2] else (),  # type: ignore[attr-defined]
+            pubdate=SqliteLibraryGateway._normalize_pubdate(row[3]),  # type: ignore[arg-type]
+            publisher=(
+                Publisher(id=str(row[4]), name=row[5])  # type: ignore[arg-type]
+                if row[4] is not None
+                else None
+            ),
+            series=(
+                Series(id=str(row[6]), name=row[7])  # type: ignore[arg-type]
+                if row[6] is not None
+                else None
+            ),
+            series_index=str(row[8]) if row[8] is not None else None,
+            rating=rating,
+            has_cover=bool(row[10]),
+        )
 
     def list_authors(self) -> list[Author]:
         connection = self._connect()
@@ -199,15 +232,7 @@ class SqliteLibraryGateway:
         total_pages, has_more = self._bounded_total_pages(
             connection, _LIST_BOOKS_COUNT_QUERY, page_size
         )
-        books = tuple(
-            Book(
-                id=str(row[0]),
-                title=row[1],  # type: ignore[arg-type]
-                authors=tuple(row[2].split(", ")) if row[2] else (),  # type: ignore[attr-defined]
-                pubdate=self._normalize_pubdate(row[3]),  # type: ignore[arg-type]
-            )
-            for row in rows
-        )
+        books = tuple(self._book_from_row(row) for row in rows)
         return PagedBooksResult(
             items=books,
             page=page,

@@ -50,6 +50,46 @@ def test_from_book_keeps_none_pubdate():
     assert book_out.pubdate is None
 
 
+def test_from_book_carries_the_enriched_fields():
+    book = Book(
+        id="1",
+        title="Dune",
+        authors=("Frank Herbert",),
+        pubdate="1965-08-01",
+        publisher=Publisher(id="1", name="Ace Books"),
+        series=Series(id="1", name="Dune Chronicles"),
+        series_index="1.0",
+        rating=4,
+        has_cover=True,
+    )
+
+    book_out = BookOut.from_book(book)
+
+    assert book_out == BookOut(
+        id="1",
+        title="Dune",
+        authors=["Frank Herbert"],
+        pubdate="1965-08-01",
+        publisher=PublisherOut(id="1", name="Ace Books"),
+        series=SeriesOut(id="1", name="Dune Chronicles"),
+        series_index="1.0",
+        rating=4,
+        has_cover=True,
+    )
+
+
+def test_from_book_defaults_enriched_fields_for_a_plain_book():
+    book = Book(id="2", title="The Hobbit", authors=("J.R.R. Tolkien",), pubdate=None)
+
+    book_out = BookOut.from_book(book)
+
+    assert book_out.publisher is None
+    assert book_out.series is None
+    assert book_out.series_index is None
+    assert book_out.rating is None
+    assert book_out.has_cover is False
+
+
 def test_from_author_converts_author_to_author_out():
     author = Author(id="3", name="Neil Gaiman")
 

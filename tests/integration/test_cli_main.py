@@ -171,11 +171,24 @@ def test_run_reports_empty_library(
     try:
         connection.executescript(
             """
-            CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT, pubdate TEXT);
+            CREATE TABLE books (
+                id INTEGER PRIMARY KEY, title TEXT, pubdate TEXT,
+                series_index REAL, path TEXT, has_cover INTEGER
+            );
             CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT);
             CREATE TABLE books_authors_link (
                 id INTEGER PRIMARY KEY, book INTEGER, author INTEGER
             );
+            CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_publishers_link (
+                id INTEGER PRIMARY KEY, book INTEGER, publisher INTEGER
+            );
+            CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE books_series_link (
+                id INTEGER PRIMARY KEY, book INTEGER, series INTEGER
+            );
+            CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INTEGER);
+            CREATE TABLE books_ratings_link (book INTEGER, rating INTEGER);
             """
         )
         connection.commit()

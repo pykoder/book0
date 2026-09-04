@@ -58,6 +58,11 @@ class BookOut(BaseModel):
     title: str
     authors: list[str]
     pubdate: str | None
+    publisher: PublisherOut | None = None
+    series: SeriesOut | None = None
+    series_index: str | None = None
+    rating: int | None = None
+    has_cover: bool = False
 
     @classmethod
     def from_book(cls, book: Book) -> "BookOut":
@@ -66,6 +71,17 @@ class BookOut(BaseModel):
             title=book.title,
             authors=list(book.authors),
             pubdate=book.pubdate,
+            publisher=(
+                PublisherOut.from_publisher(book.publisher)
+                if book.publisher is not None
+                else None
+            ),
+            series=(
+                SeriesOut.from_series(book.series) if book.series is not None else None
+            ),
+            series_index=book.series_index,
+            rating=book.rating,
+            has_cover=book.has_cover,
         )
 
 

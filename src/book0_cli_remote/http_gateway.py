@@ -215,11 +215,26 @@ class HttpLibraryGateway:
 
     @staticmethod
     def _book_from_json(row: dict[str, object]) -> Book:
+        publisher_row = row["publisher"]
+        series_row = row["series"]
         return Book(
             id=row["id"],  # type: ignore[arg-type]
             title=row["title"],  # type: ignore[arg-type]
             authors=tuple(row["authors"]),  # type: ignore[arg-type]
             pubdate=row["pubdate"],  # type: ignore[arg-type]
+            publisher=(
+                Publisher(id=publisher_row["id"], name=publisher_row["name"])  # type: ignore[index]
+                if publisher_row is not None
+                else None
+            ),
+            series=(
+                Series(id=series_row["id"], name=series_row["name"])  # type: ignore[index]
+                if series_row is not None
+                else None
+            ),
+            series_index=row["series_index"],  # type: ignore[arg-type]
+            rating=row["rating"],  # type: ignore[arg-type]
+            has_cover=bool(row["has_cover"]),
         )
 
     @staticmethod

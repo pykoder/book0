@@ -24,6 +24,19 @@ def test_list_books_returns_expected_books_for_a_known_tag(calibre_metadata_db: 
             "title": book.title,
             "authors": list(book.authors),
             "pubdate": book.pubdate,
+            "publisher": (
+                {"id": book.publisher.id, "name": book.publisher.name}
+                if book.publisher is not None
+                else None
+            ),
+            "series": (
+                {"id": book.series.id, "name": book.series.name}
+                if book.series is not None
+                else None
+            ),
+            "series_index": book.series_index,
+            "rating": book.rating,
+            "has_cover": book.has_cover,
         }
         for book in CALIBRE_LIBRARY_BOOKS
     ]
@@ -44,6 +57,19 @@ def test_list_books_resolves_metadata_db_when_configured_path_is_a_directory(
             "title": book.title,
             "authors": list(book.authors),
             "pubdate": book.pubdate,
+            "publisher": (
+                {"id": book.publisher.id, "name": book.publisher.name}
+                if book.publisher is not None
+                else None
+            ),
+            "series": (
+                {"id": book.series.id, "name": book.series.name}
+                if book.series is not None
+                else None
+            ),
+            "series_index": book.series_index,
+            "rating": book.rating,
+            "has_cover": book.has_cover,
         }
         for book in CALIBRE_LIBRARY_BOOKS
     ]

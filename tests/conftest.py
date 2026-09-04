@@ -13,16 +13,43 @@ from book0_core.models import (
 )
 
 # Books as inserted into the fixture DB, already in the order list_books()
-# is expected to return them (sorted by title).
+# is expected to return them (sorted by title). The enriched fields mirror the
+# ratings link (Dune, Calibre rating 8 -> 4/5), publisher/series links, and
+# has_cover flags seeded below.
 CALIBRE_LIBRARY_BOOKS = [
-    Book(id="1", title="Dune", authors=("Frank Herbert",), pubdate="1965-08-01"),
+    Book(
+        id="1",
+        title="Dune",
+        authors=("Frank Herbert",),
+        pubdate="1965-08-01",
+        publisher=Publisher(id="1", name="Ace Books"),
+        series=Series(id="1", name="Dune Chronicles"),
+        series_index="1.0",
+        rating=4,
+        has_cover=True,
+    ),
     Book(
         id="3",
         title="Good Omens",
         authors=("Neil Gaiman", "Terry Pratchett"),
         pubdate="1990-05-01",
+        publisher=Publisher(id="2", name="Gollancz"),
+        series=None,
+        series_index=None,
+        rating=None,
+        has_cover=True,
     ),
-    Book(id="2", title="The Hobbit", authors=("J.R.R. Tolkien",), pubdate=None),
+    Book(
+        id="2",
+        title="The Hobbit",
+        authors=("J.R.R. Tolkien",),
+        pubdate=None,
+        publisher=None,
+        series=None,
+        series_index=None,
+        rating=None,
+        has_cover=False,
+    ),
 ]
 
 # Authors as inserted into the fixture DB, already in the order list_authors()
@@ -171,6 +198,30 @@ def calibre_metadata_db(tmp_path: Path) -> Path:
                 book INTEGER NOT NULL,
                 tag INTEGER NOT NULL
             );
+            CREATE TABLE ratings (
+                id INTEGER PRIMARY KEY,
+                rating INTEGER
+            );
+            CREATE TABLE books_ratings_link (
+                book INTEGER,
+                rating INTEGER
+            );
+            CREATE TABLE languages (
+                id INTEGER PRIMARY KEY,
+                lang_code TEXT
+            );
+            CREATE TABLE books_languages_link (
+                book INTEGER,
+                lang_code INTEGER,
+                item_order INTEGER DEFAULT 0
+            );
+            CREATE TABLE data (
+                id INTEGER PRIMARY KEY,
+                book INTEGER,
+                format TEXT,
+                name TEXT,
+                uncompressed_size INTEGER
+            );
             """
         )
         connection.executemany(
@@ -227,6 +278,28 @@ def calibre_metadata_db(tmp_path: Path) -> Path:
             "INSERT INTO books_tags_link (book, tag) VALUES (?, ?)",
             [(1, 1), (1, 2), (3, 3), (3, 4)],
         )
+        # Calibre stores ratings on a 0-10 scale (2 points per star): id 1 is 4 stars.
+        connection.executemany(
+            "INSERT INTO ratings (id, rating) VALUES (?, ?)",
+            [(1, 8)],
+        )
+        connection.executemany(
+            "INSERT INTO books_ratings_link (book, rating) VALUES (?, ?)",
+            [(1, 1)],
+        )
+        connection.executemany(
+            "INSERT INTO languages (id, lang_code) VALUES (?, ?)",
+            [(1, "fra")],
+        )
+        connection.executemany(
+            "INSERT INTO books_languages_link (book, lang_code) VALUES (?, ?)",
+            [(1, 1), (2, 1), (3, 1)],
+        )
+        connection.executemany(
+            "INSERT INTO data (id, book, format, name, uncompressed_size)"
+            " VALUES (?, ?, ?, ?, ?)",
+            [(1, 1, "EPUB", "Dune", 671088)],
+        )
         connection.commit()
     finally:
         connection.close()
@@ -270,6 +343,28 @@ def many_books_db(tmp_path: Path) -> Path:
             CREATE TABLE publishers (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL
+            );
+            CREATE TABLE books_publishers_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                publisher INTEGER NOT NULL
+            );
+            CREATE TABLE series (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE books_series_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                series INTEGER NOT NULL
+            );
+            CREATE TABLE ratings (
+                id INTEGER PRIMARY KEY,
+                rating INTEGER
+            );
+            CREATE TABLE books_ratings_link (
+                book INTEGER,
+                rating INTEGER
             );
             """
         )

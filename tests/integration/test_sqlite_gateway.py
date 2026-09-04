@@ -6,6 +6,7 @@ import pytest
 from book0_core import sqlite_gateway
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.gateway import ReadLibraryGateway
+from book0_core.models import Publisher, Series
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
@@ -21,6 +22,39 @@ def test_list_books_returns_books_sorted_by_title_with_authors_and_pubdate(
     gateway = SqliteLibraryGateway(calibre_metadata_db)
 
     assert gateway.list_books() == CALIBRE_LIBRARY_BOOKS
+
+
+def test_list_books_returns_the_enriched_fields(calibre_metadata_db: Path):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    books = {book.title: book for book in gateway.list_books()}
+
+    dune = books["Dune"]
+    assert dune.publisher == Publisher(id="1", name="Ace Books")
+    assert dune.series == Series(id="1", name="Dune Chronicles")
+    assert dune.series_index == "1.0"
+    assert dune.rating == 4  # Calibre raw rating 8 / 2 (0-10 scale -> 1-5 stars)
+    assert dune.has_cover is True
+    hobbit = books["The Hobbit"]
+    assert hobbit.publisher is None
+    assert hobbit.series is None
+    assert hobbit.series_index is None
+    assert hobbit.rating is None
+    assert hobbit.has_cover is False
+    good_omens = books["Good Omens"]
+    assert good_omens.publisher == Publisher(id="2", name="Gollancz")
+    assert good_omens.series is None
+    assert good_omens.series_index is None
+    assert good_omens.rating is None
+    assert good_omens.has_cover is True
+
+
+def test_list_books_page_returns_the_enriched_fields(calibre_metadata_db: Path):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.list_books_page(1, 10)
+
+    assert list(result.items) == CALIBRE_LIBRARY_BOOKS
 
 
 def test_list_books_opens_the_database_read_only(
@@ -54,7 +88,10 @@ def test_calibre_undefined_pubdate_sentinel_is_reported_as_none(tmp_path: Path):
             CREATE TABLE books (
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL,
-                pubdate TEXT
+                pubdate TEXT,
+                series_index REAL,
+                path TEXT,
+                has_cover INTEGER
             );
             CREATE TABLE authors (
                 id INTEGER PRIMARY KEY,
@@ -64,6 +101,32 @@ def test_calibre_undefined_pubdate_sentinel_is_reported_as_none(tmp_path: Path):
                 id INTEGER PRIMARY KEY,
                 book INTEGER NOT NULL,
                 author INTEGER NOT NULL
+            );
+            CREATE TABLE publishers (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE books_publishers_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                publisher INTEGER NOT NULL
+            );
+            CREATE TABLE series (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            );
+            CREATE TABLE books_series_link (
+                id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL,
+                series INTEGER NOT NULL
+            );
+            CREATE TABLE ratings (
+                id INTEGER PRIMARY KEY,
+                rating INTEGER
+            );
+            CREATE TABLE books_ratings_link (
+                book INTEGER,
+                rating INTEGER
             );
             """
         )
@@ -484,6 +547,14 @@ def test_list_books_page_reports_zero_total_pages_for_an_empty_library(
             CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
             CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY,
                 book INTEGER NOT NULL, author INTEGER NOT NULL);
+            CREATE TABLE publishers (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE books_publishers_link (id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL, publisher INTEGER NOT NULL);
+            CREATE TABLE series (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE books_series_link (id INTEGER PRIMARY KEY,
+                book INTEGER NOT NULL, series INTEGER NOT NULL);
+            CREATE TABLE ratings (id INTEGER PRIMARY KEY, rating INTEGER);
+            CREATE TABLE books_ratings_link (book INTEGER, rating INTEGER);
             """
         )
         connection.commit()
