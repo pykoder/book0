@@ -5,8 +5,14 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    BookPatch,
     BookQuery,
     BookSort,
+    JobAction,
+    JobStatus,
+    NameTarget,
+    NameTargetById,
+    NameTargetByName,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
@@ -264,3 +270,31 @@ def test_book_query_defaut_vide():
 def test_book_sort_valeurs():
     assert BookSort("series_index") is BookSort.SERIES_INDEX
     assert SortOrder("desc") is SortOrder.DESC
+
+
+def test_job_action_et_status_valeurs_wire():
+    assert JobAction.CONVERT_MARKDOWN.value == "convert-markdown"
+    assert JobStatus.INTERRUPTED.value == "interrupted"
+
+
+def test_book_patch_tout_none_par_defaut():
+    patch = BookPatch()
+    assert patch.publisher_id is None and patch.tags is None
+
+
+def test_name_target_union():
+    assert isinstance(NameTargetById(author_id="45"), NameTarget)
+    assert isinstance(NameTargetByName(name="X"), NameTarget)
+
+
+def test_book_details_rating_defaut():
+    d = BookDetails(
+        id="1",
+        title="T",
+        pubdate=None,
+        authors=(),
+        tags=(),
+        publisher=None,
+        series=None,
+    )
+    assert d.rating is None
