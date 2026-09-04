@@ -16,6 +16,7 @@ from book0_core.errors import (
 from book0_core.gateway import ReadLibraryGateway
 from book0_core.models import (
     BookDetails,
+    BookQuery,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
@@ -522,6 +523,26 @@ def test_list_series_page_returns_the_requested_page(many_books_db: Path):
     assert result.page == 1
     assert result.page_size == 2
     assert result.total_pages == 4
+
+
+def test_query_methods_fail_fast_until_the_rest_contract_carries_filters(
+    many_books_db: Path,
+):
+    # The REST contract has no filter parameters yet, so the remote gateway
+    # cannot honor a BookQuery; it must fail fast rather than silently ignore
+    # the filters (HttpLibraryGateway still satisfies ReadLibraryGateway).
+    client = _client_for({"fiction": many_books_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+    query = BookQuery(tags=("fantasy",))
+
+    with pytest.raises(NotImplementedError):
+        gateway.query_books_page(query, 1, 10)
+    with pytest.raises(NotImplementedError):
+        gateway.query_authors_page(query, 1, 10)
+    with pytest.raises(NotImplementedError):
+        gateway.query_publishers_page(query, 1, 10)
+    with pytest.raises(NotImplementedError):
+        gateway.query_series_page(query, 1, 10)
 
 
 def test_list_books_transparently_fetches_every_page_when_server_forces_pagination(

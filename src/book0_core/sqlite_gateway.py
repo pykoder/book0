@@ -12,6 +12,8 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    BookQuery,
+    BookSort,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
@@ -19,9 +21,10 @@ from book0_core.models import (
     Publisher,
     Series,
     SeriesItem,
+    SortOrder,
 )
 
-_LIST_BOOKS_QUERY = """
+_LIST_BOOKS_QUERY_BODY = """
     SELECT
         books.id,
         books.title,
@@ -43,9 +46,11 @@ _LIST_BOOKS_QUERY = """
     LEFT JOIN series ON series.id = books_series_link.series
     LEFT JOIN books_ratings_link ON books_ratings_link.book = books.id
     LEFT JOIN ratings ON ratings.id = books_ratings_link.rating
-    GROUP BY books.id
-    ORDER BY books.title
 """
+
+_LIST_BOOKS_QUERY = (
+    _LIST_BOOKS_QUERY_BODY + "    GROUP BY books.id\n    ORDER BY books.title\n"
+)
 
 _LIST_AUTHORS_QUERY = "SELECT id, name FROM authors ORDER BY name"
 
@@ -112,6 +117,96 @@ _LIST_PUBLISHERS_COUNT_QUERY = "SELECT id FROM publishers"
 _LIST_SERIES_QUERY_FROM_OFFSET = _LIST_SERIES_QUERY + " LIMIT -1 OFFSET ?"
 _LIST_SERIES_COUNT_QUERY = "SELECT id FROM series"
 
+# Sort keys for query_books_page, expressed against _LIST_BOOKS_QUERY_BODY's
+# selected columns/aliases (publisher_name/series_name/rating_raw are aliases,
+# which SQLite resolves in ORDER BY).
+_SORT_EXPRESSIONS = {
+    BookSort.TITLE: "books.title",
+    BookSort.PUBDATE: "books.pubdate",
+    BookSort.PUBLISHER: "publisher_name",
+    BookSort.SERIES: "series_name",
+    BookSort.SERIES_INDEX: "books.series_index",
+    BookSort.RATING: "rating_raw",
+    BookSort.AUTHOR: "books.author_sort",
+}
+
+# books_<entity>_link table's column pointing at the entity's id.
+_ENTITY_LINK_COLUMNS = {
+    "authors": "author",
+    "publishers": "publisher",
+    "series": "series",
+}
+
+
+def _query_books_where(query: BookQuery, params: list) -> str:
+    """Build the WHERE clause filtering books from a BookQuery.
+
+    Every clause is self-contained: it carries its own IN (SELECT ... FROM
+    <link table> ...) with the joins it needs, so the clause can be applied
+    to a bare "FROM books" (no display joins required). Keys combine with
+    AND, values within a key with OR. Star ratings (1-5) are converted to
+    Calibre's 0-10 scale (x2) inside the SQL placeholders.
+    """
+    clauses = []
+    if query.author_ids:
+        placeholders = ",".join("?" * len(query.author_ids))
+        clauses.append(
+            "books.id IN (SELECT book FROM books_authors_link"
+            f" WHERE author IN ({placeholders}))"
+        )
+        params.extend(int(author_id) for author_id in query.author_ids)
+    if query.publisher_ids:
+        placeholders = ",".join("?" * len(query.publisher_ids))
+        clauses.append(
+            "books.id IN (SELECT book FROM books_publishers_link"
+            f" WHERE publisher IN ({placeholders}))"
+        )
+        params.extend(int(publisher_id) for publisher_id in query.publisher_ids)
+    if query.series_ids:
+        placeholders = ",".join("?" * len(query.series_ids))
+        clauses.append(
+            "books.id IN (SELECT book FROM books_series_link"
+            f" WHERE series IN ({placeholders}))"
+        )
+        params.extend(int(series_id) for series_id in query.series_ids)
+    if query.tags:
+        placeholders = ",".join("?" * len(query.tags))
+        clauses.append(
+            "books.id IN (SELECT book FROM books_tags_link"
+            " JOIN tags ON tags.id = tag"
+            f" WHERE tags.name IN ({placeholders}))"
+        )
+        params.extend(query.tags)
+    if query.languages:
+        placeholders = ",".join("?" * len(query.languages))
+        clauses.append(
+            "books.id IN (SELECT book FROM books_languages_link"
+            " JOIN languages ON languages.id = books_languages_link.lang_code"
+            f" WHERE languages.lang_code IN ({placeholders}))"
+        )
+        params.extend(query.languages)
+    if query.formats:
+        placeholders = ",".join("?" * len(query.formats))
+        clauses.append(
+            f"books.id IN (SELECT book FROM data WHERE format IN ({placeholders}))"
+        )
+        params.extend(format_.upper() for format_ in query.formats)
+    if query.ratings:
+        placeholders = ",".join("?" * len(query.ratings))
+        clauses.append(
+            "books.id IN (SELECT book FROM books_ratings_link"
+            " JOIN ratings ON ratings.id = books_ratings_link.rating"
+            f" WHERE ratings.rating IN ({placeholders}))"
+        )
+        params.extend(rating * 2 for rating in query.ratings)  # 1..5 -> 0..10
+    if query.pubdate_years:
+        year_clauses = []
+        for year in query.pubdate_years:
+            year_clauses.append("CAST(substr(books.pubdate, 1, 4) AS INTEGER) = ?")
+            params.append(year)
+        clauses.append("(" + " OR ".join(year_clauses) + ")")
+    return (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
 
 @dataclass
 class _PaginationSession:
@@ -120,6 +215,10 @@ class _PaginationSession:
     next_page: int
     cursor: sqlite3.Cursor
     last_access: float
+    # The SQL and its parameters behind the cursor, so a query-backed session
+    # can be replayed at an OFFSET after expiry instead of being lost.
+    query_sql: str | None = None
+    query_params: tuple = ()
 
 
 class SqliteLibraryGateway:
@@ -338,6 +437,136 @@ class SqliteLibraryGateway:
             handle=result_handle,
         )
 
+    def query_books_page(
+        self, query: BookQuery, page: int, page_size: int, handle: str | None = None
+    ) -> PagedBooksResult:
+        connection = self._connect()
+        params: list = []
+        where = _query_books_where(query, params)
+        direction = " DESC" if query.order is SortOrder.DESC else ""
+        order_by = _SORT_EXPRESSIONS[query.sort] + direction
+        page_sql = (
+            _LIST_BOOKS_QUERY_BODY
+            + where
+            + "\n    GROUP BY books.id\n    ORDER BY "
+            + order_by
+            + "\n    LIMIT -1 OFFSET ?"
+        )
+        count_sql = "SELECT books.id FROM books" + where
+        rows, result_handle = self._fetch_page(
+            connection, "query_books", page, page_size, handle, page_sql, tuple(params)
+        )
+        total_pages, has_more = self._bounded_total_pages(
+            connection, count_sql, page_size, tuple(params)
+        )
+        books = tuple(self._book_from_row(row) for row in rows)
+        return PagedBooksResult(
+            items=books,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=result_handle,
+        )
+
+    def query_authors_page(
+        self, query: BookQuery, page: int, page_size: int, handle: str | None = None
+    ) -> PagedAuthorsResult:
+        rows, result_handle, total_pages, has_more = self._query_entity_page(
+            "authors", "query_authors", query, page, page_size, handle
+        )
+        authors = tuple(
+            Author(id=str(row[0]), name=row[1])  # type: ignore[arg-type]
+            for row in rows
+        )
+        return PagedAuthorsResult(
+            items=authors,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=result_handle,
+        )
+
+    def query_publishers_page(
+        self, query: BookQuery, page: int, page_size: int, handle: str | None = None
+    ) -> PagedPublishersResult:
+        rows, result_handle, total_pages, has_more = self._query_entity_page(
+            "publishers", "query_publishers", query, page, page_size, handle
+        )
+        publishers = tuple(
+            Publisher(id=str(row[0]), name=row[1])  # type: ignore[arg-type]
+            for row in rows
+        )
+        return PagedPublishersResult(
+            items=publishers,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=result_handle,
+        )
+
+    def query_series_page(
+        self, query: BookQuery, page: int, page_size: int, handle: str | None = None
+    ) -> PagedSeriesResult:
+        rows, result_handle, total_pages, has_more = self._query_entity_page(
+            "series", "query_series", query, page, page_size, handle
+        )
+        series = tuple(
+            Series(id=str(row[0]), name=row[1])  # type: ignore[arg-type]
+            for row in rows
+        )
+        return PagedSeriesResult(
+            items=series,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=result_handle,
+        )
+
+    def _query_entity_page(
+        self,
+        entity: str,
+        resource: str,
+        query: BookQuery,
+        page: int,
+        page_size: int,
+        handle: str | None,
+    ) -> tuple[list[tuple[object, ...]], str | None, int | None, bool]:
+        """Page the entities participating in the books matched by query.
+
+        Each WHERE clause built by _query_books_where is self-contained (its
+        own IN-subquery with joins), so it applies to a bare "FROM books"
+        inside the entity IN (...) subquery - no display joins needed. The
+        entity's link table bridges book ids back to entity ids.
+        """
+        connection = self._connect()
+        params: list = []
+        where = _query_books_where(query, params)
+        filtered_books = f"SELECT books.id FROM books{where}"
+        link_column = _ENTITY_LINK_COLUMNS[entity]
+        entity_ids = (
+            f"SELECT {link_column} FROM books_{entity}_link"
+            f" WHERE book IN ({filtered_books})"
+        )
+        page_sql = (
+            f"SELECT DISTINCT {entity}.id, {entity}.name FROM {entity}"
+            f" WHERE {entity}.id IN ({entity_ids})"
+            f" ORDER BY {entity}.name LIMIT -1 OFFSET ?"
+        )
+        count_sql = (
+            f"SELECT {entity}.id FROM {entity} WHERE {entity}.id IN ({entity_ids})"
+        )
+        rows, result_handle = self._fetch_page(
+            connection, resource, page, page_size, handle, page_sql, tuple(params)
+        )
+        total_pages, has_more = self._bounded_total_pages(
+            connection, count_sql, page_size, tuple(params)
+        )
+        return rows, result_handle, total_pages, has_more
+
     def close_pagination(self, handle: str) -> None:
         session = self._sessions.pop(handle, None)
         if session is not None:
@@ -364,6 +593,7 @@ class SqliteLibraryGateway:
         page_size: int,
         handle: str | None,
         query_from_offset: str,
+        query_params: tuple = (),
     ) -> tuple[list[tuple[object, ...]], str | None]:
         self._prune_expired_sessions()
 
@@ -396,7 +626,7 @@ class SqliteLibraryGateway:
                 session.cursor.close()
 
             offset = (page - 1) * page_size
-            cursor = connection.execute(query_from_offset, (offset,))
+            cursor = connection.execute(query_from_offset, (*query_params, offset))
             rows = cursor.fetchmany(page_size)
             session = _PaginationSession(
                 resource=resource,
@@ -404,6 +634,8 @@ class SqliteLibraryGateway:
                 next_page=page + 1,
                 cursor=cursor,
                 last_access=self._now(),
+                query_sql=query_from_offset,
+                query_params=query_params,
             )
             result_handle = str(uuid.uuid4())
             self._sessions[result_handle] = session
@@ -416,11 +648,15 @@ class SqliteLibraryGateway:
         return rows, result_handle
 
     def _bounded_total_pages(
-        self, connection: sqlite3.Connection, count_query: str, page_size: int
+        self,
+        connection: sqlite3.Connection,
+        count_query: str,
+        page_size: int,
+        count_params: tuple = (),
     ) -> tuple[int | None, bool]:
         row_cap = _PAGE_COUNT_CAP * page_size + 1
         count = connection.execute(
-            f"SELECT COUNT(*) FROM ({count_query} LIMIT ?)", (row_cap,)
+            f"SELECT COUNT(*) FROM ({count_query} LIMIT ?)", (*count_params, row_cap)
         ).fetchone()[0]
         if count > _PAGE_COUNT_CAP * page_size:
             return None, True

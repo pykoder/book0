@@ -24,6 +24,7 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    BookQuery,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
@@ -271,6 +272,32 @@ class HttpLibraryGateway:
 
     def close_pagination(self, handle: str) -> None:
         pass
+
+    # The query_*_page methods exist on ReadLibraryGateway (and are served by
+    # book0_api's SQLite gateway server-side), but the REST contract does not
+    # carry the filter parameters yet - book0-remote cannot express a BookQuery
+    # over the wire today. They fail fast rather than silently ignoring the
+    # filters; wiring them is future work, not a silent no-op.
+
+    def query_books_page(
+        self, query: BookQuery, page: int, page_size: int, handle: str | None = None
+    ) -> PagedBooksResult:
+        raise NotImplementedError("book0-remote does not support filtered queries yet")
+
+    def query_authors_page(
+        self, query: BookQuery, page: int, page_size: int, handle: str | None = None
+    ) -> PagedAuthorsResult:
+        raise NotImplementedError("book0-remote does not support filtered queries yet")
+
+    def query_publishers_page(
+        self, query: BookQuery, page: int, page_size: int, handle: str | None = None
+    ) -> PagedPublishersResult:
+        raise NotImplementedError("book0-remote does not support filtered queries yet")
+
+    def query_series_page(
+        self, query: BookQuery, page: int, page_size: int, handle: str | None = None
+    ) -> PagedSeriesResult:
+        raise NotImplementedError("book0-remote does not support filtered queries yet")
 
     def get_book_details(self, ids: list[str]) -> BookDetailsResult:
         response = self._client.post(

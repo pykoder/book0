@@ -6,7 +6,14 @@ import pytest
 from book0_core import sqlite_gateway
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.gateway import ReadLibraryGateway
-from book0_core.models import Publisher, Series
+from book0_core.models import (
+    Author,
+    BookQuery,
+    BookSort,
+    Publisher,
+    Series,
+    SortOrder,
+)
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
@@ -846,3 +853,236 @@ def test_list_books_page_falls_back_when_handle_belongs_to_a_different_resource(
     result = gateway.list_books_page(2, 2, handle=authors_first.handle)
 
     assert [book.title for book in result.items] == ["Book 3", "Book 4"]
+
+
+def test_query_books_page_with_an_empty_query_matches_list_books_page(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    queried = gateway.query_books_page(BookQuery(), 1, 100)
+    listed = gateway.list_books_page(1, 100)
+
+    assert queried.items == listed.items
+    assert queried.total_pages == listed.total_pages == 1
+
+
+def test_query_books_page_filters_by_tag(calibre_metadata_db: Path):
+    # Seed: Dune has tags sci-fi/classic, Good Omens has fantasy/humor.
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_books_page(BookQuery(tags=("fantasy",)), 1, 100)
+
+    assert {book.title for book in result.items} == {"Good Omens"}
+
+
+def test_query_books_page_filters_by_rating(calibre_metadata_db: Path):
+    # Seed: Dune is the only rated book (Calibre raw rating 8 = 4 stars on the
+    # 1-5 scale the query accepts).
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_books_page(BookQuery(ratings=(4,)), 1, 100)
+
+    assert {book.title for book in result.items} == {"Dune"}
+
+
+def test_query_books_page_filters_by_pubdate_year(calibre_metadata_db: Path):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_books_page(BookQuery(pubdate_years=(1965,)), 1, 100)
+
+    assert {book.title for book in result.items} == {"Dune"}
+
+
+def test_query_books_page_excludes_a_null_pubdate_from_year_filters(
+    calibre_metadata_db: Path,
+):
+    # The Hobbit's NULL pubdate must not match any year filter.
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_books_page(BookQuery(pubdate_years=(1990,)), 1, 100)
+
+    assert {book.title for book in result.items} == {"Good Omens"}
+
+
+def test_query_books_page_filters_by_author_publisher_and_series_ids(
+    calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    by_author = gateway.query_books_page(BookQuery(author_ids=("1",)), 1, 100)
+    by_publisher = gateway.query_books_page(BookQuery(publisher_ids=("2",)), 1, 100)
+    by_series = gateway.query_books_page(BookQuery(series_ids=("1",)), 1, 100)
+
+    assert {book.title for book in by_author.items} == {"Dune"}
+    assert {book.title for book in by_publisher.items} == {"Good Omens"}
+    assert {book.title for book in by_series.items} == {"Dune"}
+
+
+def test_query_books_page_filters_by_language(calibre_metadata_db: Path):
+    # Seed: every book is linked to language 'fra'.
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_books_page(BookQuery(languages=("fra",)), 1, 100)
+
+    assert {book.title for book in result.items} == {
+        "Dune",
+        "Good Omens",
+        "The Hobbit",
+    }
+
+
+def test_query_books_page_filters_by_format_case_insensitively(
+    calibre_metadata_db: Path,
+):
+    # Seed: only Dune has a data row (format EPUB); the query accepts lowercase.
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_books_page(BookQuery(formats=("epub",)), 1, 100)
+
+    assert {book.title for book in result.items} == {"Dune"}
+
+
+def test_query_books_page_combines_keys_with_and_and_values_with_or(
+    calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    # OR within a key: either tag matches.
+    either_tag = gateway.query_books_page(BookQuery(tags=("sci-fi", "fantasy")), 1, 100)
+    # AND between keys: sci-fi tag AND a rating no seeded book has.
+    both_keys = gateway.query_books_page(
+        BookQuery(tags=("sci-fi",), ratings=(2,)), 1, 100
+    )
+
+    assert {book.title for book in either_tag.items} == {"Dune", "Good Omens"}
+    assert both_keys.items == ()
+    assert both_keys.handle is None
+    assert both_keys.total_pages == 0
+
+
+def test_query_books_page_sorts_by_pubdate_desc_with_nulls_last(
+    calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_books_page(
+        BookQuery(sort=BookSort.PUBDATE, order=SortOrder.DESC), 1, 100
+    )
+
+    assert [book.title for book in result.items] == [
+        "Good Omens",  # 1990
+        "Dune",  # 1965
+        "The Hobbit",  # NULL pubdate
+    ]
+
+
+def test_query_books_page_sorts_by_title_desc(calibre_metadata_db: Path):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_books_page(BookQuery(order=SortOrder.DESC), 1, 100)
+
+    assert [book.title for book in result.items] == [
+        "The Hobbit",
+        "Good Omens",
+        "Dune",
+    ]
+
+
+def test_query_authors_page_returns_authors_of_the_filtered_books(
+    calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_authors_page(BookQuery(tags=("fantasy",)), 1, 100)
+
+    assert set(result.items) == {
+        Author(id="3", name="Neil Gaiman"),
+        Author(id="4", name="Terry Pratchett"),
+    }
+
+
+def test_query_publishers_page_returns_publishers_of_the_filtered_books(
+    calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_publishers_page(BookQuery(tags=("sci-fi",)), 1, 100)
+
+    assert set(result.items) == {Publisher(id="1", name="Ace Books")}
+
+
+def test_query_series_page_returns_series_of_the_filtered_books(
+    calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    sci_fi = gateway.query_series_page(BookQuery(tags=("sci-fi",)), 1, 100)
+    fantasy = gateway.query_series_page(BookQuery(tags=("fantasy",)), 1, 100)
+
+    assert set(sci_fi.items) == {Series(id="1", name="Dune Chronicles")}
+    assert fantasy.items == ()
+    assert fantasy.handle is None
+
+
+def test_query_authors_page_paginates_in_name_order(calibre_metadata_db: Path):
+    # All four seeded authors are linked to at least one book.
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    result = gateway.query_authors_page(BookQuery(), 1, 2)
+
+    assert [author.name for author in result.items] == [
+        "Frank Herbert",
+        "J.R.R. Tolkien",
+    ]
+    assert result.total_pages == 2
+
+
+def test_query_authors_page_excludes_authors_linked_to_no_book(many_books_db: Path):
+    # many_books_db seeds authors but no books_authors_link rows: none of them
+    # participates in any book, so none may come back from a query.
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.query_authors_page(BookQuery(), 1, 10)
+
+    assert result.items == ()
+    assert result.total_pages == 0
+
+
+def test_query_books_page_reuses_the_session_for_the_immediate_next_page(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.query_books_page(BookQuery(), 1, 2)
+    traced_sql: list[str] = []
+    gateway._connect().set_trace_callback(traced_sql.append)
+    second = gateway.query_books_page(BookQuery(), 2, 2, handle=first.handle)
+
+    assert [book.title for book in second.items] == ["Book 3", "Book 4"]
+    assert not any("OFFSET" in sql for sql in traced_sql)
+
+
+def test_query_books_page_last_page_has_no_handle(many_books_db: Path):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.query_books_page(BookQuery(), 4, 2)
+
+    assert [book.title for book in result.items] == ["Book 7"]
+    assert result.handle is None
+
+
+def test_query_books_page_replays_the_query_when_the_session_has_expired(
+    many_books_db: Path, monkeypatch: pytest.MonkeyPatch
+):
+    fake_now = [1000.0]
+    monkeypatch.setattr(SqliteLibraryGateway, "_now", lambda self: fake_now[0])
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.query_books_page(BookQuery(), 1, 2)
+    fake_now[0] += 61
+    result = gateway.query_books_page(BookQuery(), 2, 2, handle=first.handle)
+
+    assert [book.title for book in result.items] == ["Book 3", "Book 4"]
+    assert first.handle not in gateway._sessions
+    assert result.handle != first.handle
