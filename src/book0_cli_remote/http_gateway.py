@@ -25,6 +25,7 @@ from book0_core.models import (
     BookDetails,
     BookDetailsResult,
     BookQuery,
+    FieldValue,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
@@ -298,6 +299,11 @@ class HttpLibraryGateway:
         self, query: BookQuery, page: int, page_size: int, handle: str | None = None
     ) -> PagedSeriesResult:
         raise NotImplementedError("book0-remote does not support filtered queries yet")
+
+    def list_field_values(
+        self, field: Literal["tags", "languages", "formats", "ratings"]
+    ) -> list[FieldValue]:
+        raise NotImplementedError("book0-remote does not support facet queries yet")
 
     def get_book_details(self, ids: list[str]) -> BookDetailsResult:
         response = self._client.post(

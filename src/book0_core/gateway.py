@@ -1,10 +1,11 @@
-from typing import Protocol
+from typing import Literal, Protocol
 
 from book0_core.models import (
     Author,
     Book,
     BookDetailsResult,
     BookQuery,
+    FieldValue,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
@@ -44,4 +45,7 @@ class ReadLibraryGateway(Protocol):
     def query_series_page(
         self, query: BookQuery, page: int, page_size: int, handle: str | None = None
     ) -> PagedSeriesResult: ...
+    def list_field_values(
+        self, field: Literal["tags", "languages", "formats", "ratings"]
+    ) -> list[FieldValue]: ...
     def close_pagination(self, handle: str) -> None: ...

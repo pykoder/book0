@@ -799,3 +799,236 @@ def test_list_series_returns_a_paginated_response_when_page_size_is_given(
     assert body["page_size"] == 2
     assert body["total_pages"] == 4
     assert body["has_more_than_shown"] is False
+
+
+def test_list_books_routes_through_the_filtered_query_when_a_filter_param_is_given(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books", params={"tag": "fiction", "ratings": "4"})
+
+    assert response.status_code == 200
+    assert [book["title"] for book in response.json()] == ["Dune"]
+
+
+def test_list_books_expands_a_ratings_range_filter(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books", params={"tag": "fiction", "ratings": "3-5"}
+    )
+
+    assert response.status_code == 200
+    assert all(book["rating"] is not None for book in response.json())
+
+
+def test_list_books_filters_by_tag_text(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books", params={"tag": "fiction", "tags": "sci-fi"}
+    )
+
+    assert response.status_code == 200
+    assert [book["title"] for book in response.json()] == ["Dune"]
+
+
+def test_list_books_honors_sort_and_order_through_the_filtered_query(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books",
+        params={"tag": "fiction", "sort": "pubdate", "order": "desc"},
+    )
+
+    assert response.status_code == 200
+    # 1990 first, 1965 second; the NULL-pubdate Hobbit sorts last in DESC.
+    assert [book["title"] for book in response.json()] == [
+        "Good Omens",
+        "Dune",
+        "The Hobbit",
+    ]
+
+
+def test_list_books_returns_a_paginated_response_for_a_filtered_query(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books",
+        params={"tag": "fiction", "ratings": "4", "page": 1, "page_size": 2},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["title"] for item in body["items"]] == ["Dune"]
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+
+
+def test_list_books_returns_422_for_an_invalid_filter(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books", params={"tag": "fiction", "ratings": "5-3"}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "InvalidFilterError"
+
+
+def test_list_books_returns_422_for_an_unknown_sort(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/books", params={"tag": "fiction", "sort": "banana"}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "InvalidFilterError"
+
+
+def test_list_authors_filters_through_the_cascade_query(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/authors", params={"tag": "fiction", "series_id": "1"}
+    )
+
+    assert response.status_code == 200
+    assert [author["name"] for author in response.json()] == ["Frank Herbert"]
+
+
+def test_list_authors_returns_422_for_an_invalid_cascade_filter(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/authors", params={"tag": "fiction", "series_id": "1-3"}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "InvalidFilterError"
+
+
+def test_list_publishers_filters_through_the_cascade_query(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/publishers", params={"tag": "fiction", "tags": "fantasy"}
+    )
+
+    assert response.status_code == 200
+    assert [publisher["name"] for publisher in response.json()] == ["Gollancz"]
+
+
+def test_list_series_filters_through_the_cascade_query(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/series", params={"tag": "fiction", "tags": "sci-fi"}
+    )
+
+    assert response.status_code == 200
+    assert [series["name"] for series in response.json()] == ["Dune Chronicles"]
+
+
+def test_list_series_empty_cascade_result_when_no_book_matches(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/series", params={"tag": "fiction", "tags": "humor"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_get_values_returns_ratings_facet_values(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/values/ratings", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    # Calibre rating 8 (raw) -> 4 stars; only Dune carries a rating.
+    assert response.json() == [{"value": "4", "count": 1}]
+
+
+def test_get_values_returns_tags_facet_values_sorted_by_count_then_name(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/values/tags", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    # All four tags have count 1, so the name tiebreak orders them alphabetically.
+    assert response.json() == [
+        {"value": "classic", "count": 1},
+        {"value": "fantasy", "count": 1},
+        {"value": "humor", "count": 1},
+        {"value": "sci-fi", "count": 1},
+    ]
+
+
+def test_get_values_returns_languages_facet_values(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/values/languages", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    assert response.json() == [{"value": "fra", "count": 3}]
+
+
+def test_get_values_returns_formats_facet_values(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/values/formats", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    assert response.json() == [{"value": "EPUB", "count": 1}]
+
+
+def test_get_values_returns_422_for_a_field_outside_the_whitelist(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/values/isbn", params={"tag": "fiction"})
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "InvalidFilterError"
+
+
+def test_get_values_returns_404_when_configured_path_is_missing(tmp_path: Path):
+    app = create_app({"fiction": tmp_path / "does-not-exist.db"})
+    client = TestClient(app)
+
+    response = client.get("/libraries/values/tags", params={"tag": "fiction"})
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "LibraryNotFoundError"

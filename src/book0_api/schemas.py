@@ -5,6 +5,7 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    FieldValue,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
@@ -208,3 +209,12 @@ class BookDetailsResultOut(BaseModel):
 
 class BookIdsIn(BaseModel):
     ids: list[str]
+
+
+class FieldValueOut(BaseModel):
+    value: str
+    count: int
+
+    @classmethod
+    def from_field_value(cls, field_value: FieldValue) -> "FieldValueOut":
+        return cls(value=field_value.value, count=field_value.count)

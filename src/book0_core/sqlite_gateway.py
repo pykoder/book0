@@ -4,7 +4,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from book0_core.errors import LibraryNotFoundError, NotACalibreLibraryError
 from book0_core.models import (
@@ -14,6 +14,7 @@ from book0_core.models import (
     BookDetailsResult,
     BookQuery,
     BookSort,
+    FieldValue,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
@@ -135,6 +136,37 @@ _ENTITY_LINK_COLUMNS = {
     "authors": "author",
     "publishers": "publisher",
     "series": "series",
+}
+
+# Facet queries for list_field_values: one per whitelisted field, each returning
+# (value, count) ordered by count DESC then value. Column names are qualified -
+# languages joins books_languages_link (both sides have a lang_code column) and
+# ratings joins books_ratings_link, so unqualified names would be ambiguous.
+_FACET_QUERIES: dict[str, str] = {
+    "tags": (
+        "SELECT tags.name, count(*) FROM tags"
+        " JOIN books_tags_link ON tag = tags.id"
+        " GROUP BY tags.name ORDER BY count(*) DESC, tags.name"
+    ),
+    "languages": (
+        "SELECT languages.lang_code, count(*) FROM languages"
+        " JOIN books_languages_link ON books_languages_link.lang_code = languages.id"
+        " GROUP BY languages.lang_code ORDER BY count(*) DESC, languages.lang_code"
+    ),
+    "formats": (
+        "SELECT data.format, count(*) FROM data"
+        " WHERE data.format IS NOT NULL"
+        " GROUP BY data.format ORDER BY count(*) DESC, data.format"
+    ),
+    # Star rating = raw//2; raw 0 means "no rating" in Calibre, hence the > 0
+    # guard. Grouping by the derived star value merges raw 3 and raw 4 (both
+    # 1 star) into a single facet entry.
+    "ratings": (
+        "SELECT ratings.rating / 2, count(*) FROM ratings"
+        " JOIN books_ratings_link ON books_ratings_link.rating = ratings.id"
+        " WHERE ratings.rating > 0"
+        " GROUP BY ratings.rating / 2 ORDER BY count(*) DESC, ratings.rating / 2"
+    ),
 }
 
 
@@ -525,6 +557,14 @@ class SqliteLibraryGateway:
             has_more_than_shown=has_more,
             handle=result_handle,
         )
+
+    def list_field_values(
+        self, field: Literal["tags", "languages", "formats", "ratings"]
+    ) -> list[FieldValue]:
+        connection = self._connect()
+        rows = connection.execute(_FACET_QUERIES[field]).fetchall()
+
+        return [FieldValue(value=str(row[0]), count=row[1]) for row in rows]
 
     def _query_entity_page(
         self,
