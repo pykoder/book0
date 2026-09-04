@@ -1,3 +1,4 @@
+from contextlib import closing
 from pathlib import Path
 from typing import Literal
 
@@ -25,6 +26,7 @@ from book0_core.errors import (
     TagRequiredError,
 )
 from book0_core.models import BookQuery, BookSort, SortOrder
+from book0_core.pg_gateway import PgLibraryGateway
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 
 # Whitelist of the facet fields served by GET /libraries/values/{field}. The
@@ -174,19 +176,24 @@ def create_app(
     libraries: dict[str, Path],
     default_tag: str | None = None,
     default_page_size: int | None = None,
+    pg_dsn: str | None = None,
 ) -> FastAPI:
     app = FastAPI()
 
-    def _resolve_db_path(tag: str | None) -> Path:
+    def _resolve_gateway(tag: str | None) -> PgLibraryGateway | SqliteLibraryGateway:
         resolved_tag = tag if tag is not None else default_tag
         if resolved_tag is None:
             raise TagRequiredError(
                 "No tag given and no default-library configured for this server"
             )
+        if pg_dsn is not None:
+            # Toutes les routes basculent sur PG ; le dict libraries de chemins
+            # est ignoré. Un tag inconnu lève LibraryNotFoundError (-> 404).
+            return PgLibraryGateway(pg_dsn, resolved_tag)
         db_path = libraries.get(resolved_tag)
         if db_path is None:
             raise TagRequiredError(f"Unknown library tag: {resolved_tag!r}")
-        return db_path
+        return SqliteLibraryGateway(db_path)
 
     @app.get("/libraries/books", response_model=None)
     def list_books(
@@ -205,11 +212,16 @@ def create_app(
         order: str | None = None,
     ) -> list[BookOut] | PagedBooksOut | JSONResponse:
         try:
-            db_path = _resolve_db_path(tag)
+            gateway = _resolve_gateway(tag)
         except TagRequiredError as error:
             return JSONResponse(
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
             )
 
         try:
@@ -233,41 +245,41 @@ def create_app(
 
         effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
 
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            if has_filters:
-                query_page_size = (
-                    effective_page_size
-                    if effective_page_size is not None
-                    else _QUERY_ALL_PAGE_SIZE
+        with closing(gateway):
+            try:
+                if has_filters:
+                    query_page_size = (
+                        effective_page_size
+                        if effective_page_size is not None
+                        else _QUERY_ALL_PAGE_SIZE
+                    )
+                    query_result = gateway.query_books_page(
+                        query, _resolve_effective_page(page), query_page_size
+                    )
+                elif effective_page_size is None:
+                    books = gateway.list_books()
+                else:
+                    paged_result = gateway.list_books_page(
+                        _resolve_effective_page(page), effective_page_size
+                    )
+            except LibraryNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "LibraryNotFoundError", "detail": str(error)},
                 )
-                query_result = gateway.query_books_page(
-                    query, _resolve_effective_page(page), query_page_size
+            except NotACalibreLibraryError as error:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "NotACalibreLibraryError", "detail": str(error)},
                 )
-            elif effective_page_size is None:
-                books = gateway.list_books()
-            else:
-                paged_result = gateway.list_books_page(
-                    _resolve_effective_page(page), effective_page_size
-                )
-        except LibraryNotFoundError as error:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "LibraryNotFoundError", "detail": str(error)},
-            )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
-            )
 
-        if has_filters:
+            if has_filters:
+                if effective_page_size is None:
+                    return [BookOut.from_book(book) for book in query_result.items]
+                return PagedBooksOut.from_paged_result(query_result)
             if effective_page_size is None:
-                return [BookOut.from_book(book) for book in query_result.items]
-            return PagedBooksOut.from_paged_result(query_result)
-        if effective_page_size is None:
-            return [BookOut.from_book(book) for book in books]
-        return PagedBooksOut.from_paged_result(paged_result)
+                return [BookOut.from_book(book) for book in books]
+            return PagedBooksOut.from_paged_result(paged_result)
 
     @app.get("/libraries/authors", response_model=None)
     def list_authors(
@@ -284,11 +296,16 @@ def create_app(
         pubdate: str | None = None,
     ) -> list[AuthorOut] | PagedAuthorsOut | JSONResponse:
         try:
-            db_path = _resolve_db_path(tag)
+            gateway = _resolve_gateway(tag)
         except TagRequiredError as error:
             return JSONResponse(
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
             )
 
         try:
@@ -312,41 +329,43 @@ def create_app(
 
         effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
 
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            if has_filters:
-                query_page_size = (
-                    effective_page_size
-                    if effective_page_size is not None
-                    else _QUERY_ALL_PAGE_SIZE
+        with closing(gateway):
+            try:
+                if has_filters:
+                    query_page_size = (
+                        effective_page_size
+                        if effective_page_size is not None
+                        else _QUERY_ALL_PAGE_SIZE
+                    )
+                    query_result = gateway.query_authors_page(
+                        query, _resolve_effective_page(page), query_page_size
+                    )
+                elif effective_page_size is None:
+                    authors = gateway.list_authors()
+                else:
+                    paged_result = gateway.list_authors_page(
+                        _resolve_effective_page(page), effective_page_size
+                    )
+            except LibraryNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "LibraryNotFoundError", "detail": str(error)},
                 )
-                query_result = gateway.query_authors_page(
-                    query, _resolve_effective_page(page), query_page_size
+            except NotACalibreLibraryError as error:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "NotACalibreLibraryError", "detail": str(error)},
                 )
-            elif effective_page_size is None:
-                authors = gateway.list_authors()
-            else:
-                paged_result = gateway.list_authors_page(
-                    _resolve_effective_page(page), effective_page_size
-                )
-        except LibraryNotFoundError as error:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "LibraryNotFoundError", "detail": str(error)},
-            )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
-            )
 
-        if has_filters:
+            if has_filters:
+                if effective_page_size is None:
+                    return [
+                        AuthorOut.from_author(author) for author in query_result.items
+                    ]
+                return PagedAuthorsOut.from_paged_result(query_result)
             if effective_page_size is None:
-                return [AuthorOut.from_author(author) for author in query_result.items]
-            return PagedAuthorsOut.from_paged_result(query_result)
-        if effective_page_size is None:
-            return [AuthorOut.from_author(author) for author in authors]
-        return PagedAuthorsOut.from_paged_result(paged_result)
+                return [AuthorOut.from_author(author) for author in authors]
+            return PagedAuthorsOut.from_paged_result(paged_result)
 
     @app.get("/libraries/publishers", response_model=None)
     def list_publishers(
@@ -363,11 +382,16 @@ def create_app(
         pubdate: str | None = None,
     ) -> list[PublisherOut] | PagedPublishersOut | JSONResponse:
         try:
-            db_path = _resolve_db_path(tag)
+            gateway = _resolve_gateway(tag)
         except TagRequiredError as error:
             return JSONResponse(
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
             )
 
         try:
@@ -391,44 +415,46 @@ def create_app(
 
         effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
 
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            if has_filters:
-                query_page_size = (
-                    effective_page_size
-                    if effective_page_size is not None
-                    else _QUERY_ALL_PAGE_SIZE
+        with closing(gateway):
+            try:
+                if has_filters:
+                    query_page_size = (
+                        effective_page_size
+                        if effective_page_size is not None
+                        else _QUERY_ALL_PAGE_SIZE
+                    )
+                    query_result = gateway.query_publishers_page(
+                        query, _resolve_effective_page(page), query_page_size
+                    )
+                elif effective_page_size is None:
+                    publishers = gateway.list_publishers()
+                else:
+                    paged_result = gateway.list_publishers_page(
+                        _resolve_effective_page(page), effective_page_size
+                    )
+            except LibraryNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "LibraryNotFoundError", "detail": str(error)},
                 )
-                query_result = gateway.query_publishers_page(
-                    query, _resolve_effective_page(page), query_page_size
+            except NotACalibreLibraryError as error:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "NotACalibreLibraryError", "detail": str(error)},
                 )
-            elif effective_page_size is None:
-                publishers = gateway.list_publishers()
-            else:
-                paged_result = gateway.list_publishers_page(
-                    _resolve_effective_page(page), effective_page_size
-                )
-        except LibraryNotFoundError as error:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "LibraryNotFoundError", "detail": str(error)},
-            )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
-            )
 
-        if has_filters:
+            if has_filters:
+                if effective_page_size is None:
+                    return [
+                        PublisherOut.from_publisher(publisher)
+                        for publisher in query_result.items
+                    ]
+                return PagedPublishersOut.from_paged_result(query_result)
             if effective_page_size is None:
                 return [
-                    PublisherOut.from_publisher(publisher)
-                    for publisher in query_result.items
+                    PublisherOut.from_publisher(publisher) for publisher in publishers
                 ]
-            return PagedPublishersOut.from_paged_result(query_result)
-        if effective_page_size is None:
-            return [PublisherOut.from_publisher(publisher) for publisher in publishers]
-        return PagedPublishersOut.from_paged_result(paged_result)
+            return PagedPublishersOut.from_paged_result(paged_result)
 
     @app.get("/libraries/series", response_model=None)
     def list_series(
@@ -451,11 +477,16 @@ def create_app(
         # produce, so sort/order need no SQL-side handling until a second sort
         # key exists.
         try:
-            db_path = _resolve_db_path(tag)
+            gateway = _resolve_gateway(tag)
         except TagRequiredError as error:
             return JSONResponse(
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
             )
 
         try:
@@ -479,41 +510,41 @@ def create_app(
 
         effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
 
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            if has_filters:
-                query_page_size = (
-                    effective_page_size
-                    if effective_page_size is not None
-                    else _QUERY_ALL_PAGE_SIZE
+        with closing(gateway):
+            try:
+                if has_filters:
+                    query_page_size = (
+                        effective_page_size
+                        if effective_page_size is not None
+                        else _QUERY_ALL_PAGE_SIZE
+                    )
+                    query_result = gateway.query_series_page(
+                        query, _resolve_effective_page(page), query_page_size
+                    )
+                elif effective_page_size is None:
+                    series = gateway.list_series()
+                else:
+                    paged_result = gateway.list_series_page(
+                        _resolve_effective_page(page), effective_page_size
+                    )
+            except LibraryNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "LibraryNotFoundError", "detail": str(error)},
                 )
-                query_result = gateway.query_series_page(
-                    query, _resolve_effective_page(page), query_page_size
+            except NotACalibreLibraryError as error:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "NotACalibreLibraryError", "detail": str(error)},
                 )
-            elif effective_page_size is None:
-                series = gateway.list_series()
-            else:
-                paged_result = gateway.list_series_page(
-                    _resolve_effective_page(page), effective_page_size
-                )
-        except LibraryNotFoundError as error:
-            return JSONResponse(
-                status_code=404,
-                content={"error": "LibraryNotFoundError", "detail": str(error)},
-            )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
-            )
 
-        if has_filters:
+            if has_filters:
+                if effective_page_size is None:
+                    return [SeriesOut.from_series(item) for item in query_result.items]
+                return PagedSeriesOut.from_paged_result(query_result)
             if effective_page_size is None:
-                return [SeriesOut.from_series(item) for item in query_result.items]
-            return PagedSeriesOut.from_paged_result(query_result)
-        if effective_page_size is None:
-            return [SeriesOut.from_series(series) for series in series]
-        return PagedSeriesOut.from_paged_result(paged_result)
+                return [SeriesOut.from_series(series) for series in series]
+            return PagedSeriesOut.from_paged_result(paged_result)
 
     @app.get("/libraries/values/{field}", response_model=None)
     def get_values(
@@ -530,87 +561,108 @@ def create_app(
             )
 
         try:
-            db_path = _resolve_db_path(tag)
+            gateway = _resolve_gateway(tag)
         except TagRequiredError as error:
             return JSONResponse(
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
             )
-
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            values = gateway.list_field_values(facet_field)
         except LibraryNotFoundError as error:
             return JSONResponse(
                 status_code=404,
                 content={"error": "LibraryNotFoundError", "detail": str(error)},
             )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
-            )
 
-        return [FieldValueOut.from_field_value(value) for value in values]
+        with closing(gateway):
+            try:
+                values = gateway.list_field_values(facet_field)
+            except LibraryNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "LibraryNotFoundError", "detail": str(error)},
+                )
+            except NotACalibreLibraryError as error:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "NotACalibreLibraryError", "detail": str(error)},
+                )
+
+            return [FieldValueOut.from_field_value(value) for value in values]
 
     @app.post("/libraries/books/detail", response_model=None)
     def get_book_details(
         body: BookIdsIn, tag: str | None = None
     ) -> BookDetailsResultOut | JSONResponse:
         try:
-            db_path = _resolve_db_path(tag)
+            gateway = _resolve_gateway(tag)
         except TagRequiredError as error:
             return JSONResponse(
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
             )
-
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            result = gateway.get_book_details(body.ids)
         except LibraryNotFoundError as error:
             return JSONResponse(
                 status_code=404,
                 content={"error": "LibraryNotFoundError", "detail": str(error)},
             )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
-            )
 
-        return BookDetailsResultOut.from_book_details_result(result)
+        with closing(gateway):
+            try:
+                result = gateway.get_book_details(body.ids)
+            except LibraryNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "LibraryNotFoundError", "detail": str(error)},
+                )
+            except NotACalibreLibraryError as error:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "NotACalibreLibraryError", "detail": str(error)},
+                )
+
+            return BookDetailsResultOut.from_book_details_result(result)
 
     @app.get("/libraries/books/{id}/cover", response_model=None)
     def get_book_cover(id: str, tag: str | None = None) -> Response | JSONResponse:
         try:
-            db_path = _resolve_db_path(tag)
+            gateway = _resolve_gateway(tag)
         except TagRequiredError as error:
             return JSONResponse(
                 status_code=400,
                 content={"error": "TagRequiredError", "detail": str(error)},
             )
-
-        gateway = SqliteLibraryGateway(db_path)
-        try:
-            result = gateway.get_book_details([id])
         except LibraryNotFoundError as error:
             return JSONResponse(
                 status_code=404,
                 content={"error": "LibraryNotFoundError", "detail": str(error)},
             )
-        except NotACalibreLibraryError as error:
-            return JSONResponse(
-                status_code=500,
-                content={"error": "NotACalibreLibraryError", "detail": str(error)},
+
+        with closing(gateway):
+            try:
+                result = gateway.get_book_details([id])
+            except LibraryNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "LibraryNotFoundError", "detail": str(error)},
+                )
+            except NotACalibreLibraryError as error:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "NotACalibreLibraryError", "detail": str(error)},
+                )
+
+            if not result.books:
+                return _cover_not_found(id)
+            cover_path = result.books[0].cover_path
+            if (
+                cover_path is None
+                or cover_path is False
+                or not Path(cover_path).is_file()
+            ):
+                return _cover_not_found(id)
+
+            return Response(
+                content=Path(cover_path).read_bytes(), media_type="image/jpeg"
             )
-
-        if not result.books:
-            return _cover_not_found(id)
-        cover_path = result.books[0].cover_path
-        if cover_path is None or cover_path is False or not Path(cover_path).is_file():
-            return _cover_not_found(id)
-
-        return Response(content=Path(cover_path).read_bytes(), media_type="image/jpeg")
 
     return app

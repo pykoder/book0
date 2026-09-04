@@ -31,3 +31,9 @@ work = "${WORK_LIBRARY_PATH}"
 # unbounded query when unset, no cap is imposed and an omitted page_size stays unpaginated,
 # exactly like today.
 # default-page-size = 100
+
+# Optional: PostgreSQL DSN. When set, every route is served from the PG
+# catalog (calibre_pg_sync schema) instead of the SQLite metadata.db paths
+# above - the tag resolves to libraries.name and the `libraries` mapping is
+# ignored. Leave commented to keep serving SQLite files.
+# pg-dsn = "postgresql://postgres:…@localhost:5432/grimoire"

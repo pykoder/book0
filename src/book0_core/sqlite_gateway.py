@@ -612,6 +612,15 @@ class SqliteLibraryGateway:
         if session is not None:
             session.cursor.close()
 
+    def close(self) -> None:
+        """Ferme la connexion paresseuse si elle est ouverte ; sans effet sinon.
+
+        La connexion est rouverte à la demande au prochain appel de méthode.
+        """
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+
     def _now(self) -> float:
         return time.monotonic()
 

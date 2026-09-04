@@ -12,6 +12,7 @@ class LibraryConfig:
     libraries: dict[str, Path]
     default_tag: str | None
     default_page_size: int | None = None
+    pg_dsn: str | None = None
 
 
 def _expand_env_vars(value: str) -> str:
@@ -28,4 +29,5 @@ def load_libraries(config_path: Path) -> LibraryConfig:
         libraries=libraries,
         default_tag=data.get("default-library"),
         default_page_size=data.get("default-page-size"),
+        pg_dsn=data.get("pg-dsn"),
     )

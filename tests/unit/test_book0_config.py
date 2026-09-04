@@ -92,3 +92,24 @@ def test_load_libraries_default_page_size_is_none_when_absent(tmp_path: Path):
     config = load_libraries(config_path)
 
     assert config.default_page_size is None
+
+
+def test_load_libraries_reads_pg_dsn_when_present(tmp_path: Path):
+    config_path = tmp_path / "libraries.toml"
+    config_path.write_text(
+        'pg-dsn = "postgresql://postgres:test@localhost:5432/grimoire"\n\n'
+        '[libraries]\nfiction = "/path/to/fiction/metadata.db"\n'
+    )
+
+    config = load_libraries(config_path)
+
+    assert config.pg_dsn == "postgresql://postgres:test@localhost:5432/grimoire"
+
+
+def test_load_libraries_pg_dsn_is_none_when_absent(tmp_path: Path):
+    config_path = tmp_path / "libraries.toml"
+    config_path.write_text('[libraries]\nfiction = "/path/to/fiction/metadata.db"\n')
+
+    config = load_libraries(config_path)
+
+    assert config.pg_dsn is None
