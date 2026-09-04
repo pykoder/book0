@@ -11,16 +11,19 @@ from book0_api.schemas import (
     BookDetailsResultOut,
     BookIdsIn,
     BookOut,
+    EditBooksOut,
     FieldValueOut,
     PagedAuthorsOut,
     PagedBooksOut,
     PagedPublishersOut,
     PagedSeriesOut,
+    PatchBooksIn,
     PublisherOut,
     SeriesOut,
 )
 from book0_core.errors import (
     InvalidFilterError,
+    InvalidPatchError,
     LibraryNotFoundError,
     NotACalibreLibraryError,
     TagRequiredError,
@@ -623,6 +626,59 @@ def create_app(
                 )
 
             return BookDetailsResultOut.from_book_details_result(result)
+
+    @app.patch("/libraries/books", response_model=None)
+    def patch_books(
+        body: PatchBooksIn, tag: str | None = None
+    ) -> EditBooksOut | JSONResponse:
+        try:
+            gateway = _resolve_gateway(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+
+        with closing(gateway):
+            if not isinstance(gateway, PgLibraryGateway):
+                # SqliteLibraryGateway est en lecture seule par construction
+                # (metadata.db Calibre ne doit jamais être modifiée) :
+                # l'édition en masse n'est servie qu'en mode PG.
+                return JSONResponse(
+                    status_code=501,
+                    content={
+                        "error": "NotImplementedError",
+                        "detail": (
+                            "PATCH /libraries/books requires a PG-backed library"
+                        ),
+                    },
+                )
+            try:
+                result = gateway.edit_books(
+                    body.ids, body.patch.to_book_patch(), body.dry_run
+                )
+            except InvalidPatchError as error:
+                return JSONResponse(
+                    status_code=422,
+                    content={"error": "InvalidPatchError", "detail": str(error)},
+                )
+            except LibraryNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "LibraryNotFoundError", "detail": str(error)},
+                )
+            except NotACalibreLibraryError as error:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "NotACalibreLibraryError", "detail": str(error)},
+                )
+
+            return EditBooksOut.from_result(result)
 
     @app.get("/libraries/books/{id}/cover", response_model=None)
     def get_book_cover(id: str, tag: str | None = None) -> Response | JSONResponse:

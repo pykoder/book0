@@ -5,6 +5,8 @@ from book0_core.models import (
     Book,
     BookDetails,
     BookDetailsResult,
+    BookPatch,
+    EditBooksResult,
     FieldValue,
     PagedAuthorsResult,
     PagedBooksResult,
@@ -203,6 +205,49 @@ class BookDetailsResultOut(BaseModel):
     ) -> "BookDetailsResultOut":
         return cls(
             books=[BookDetailsOut.from_book_details(book) for book in result.books],
+            missing_ids=list(result.missing_ids),
+        )
+
+
+class BookPatchIn(BaseModel):
+    """PATCH en masse : champ None = non modifié (absent du JSON = None)."""
+
+    publisher_id: str | None = None
+    series_id: str | None = None
+    series_index: str | None = None
+    tags: list[str] | None = None
+    rating: int | None = None
+    pubdate: str | None = None
+    language: str | None = None
+    comments: str | None = None
+
+    def to_book_patch(self) -> BookPatch:
+        return BookPatch(
+            publisher_id=self.publisher_id,
+            series_id=self.series_id,
+            series_index=self.series_index,
+            tags=tuple(self.tags) if self.tags is not None else None,
+            rating=self.rating,
+            pubdate=self.pubdate,
+            language=self.language,
+            comments=self.comments,
+        )
+
+
+class PatchBooksIn(BaseModel):
+    ids: list[str]
+    patch: BookPatchIn
+    dry_run: bool = False
+
+
+class EditBooksOut(BaseModel):
+    updated: list[str]
+    missing_ids: list[str]
+
+    @classmethod
+    def from_result(cls, result: EditBooksResult) -> "EditBooksOut":
+        return cls(
+            updated=list(result.updated),
             missing_ids=list(result.missing_ids),
         )
 

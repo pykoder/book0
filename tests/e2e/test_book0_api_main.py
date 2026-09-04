@@ -1045,3 +1045,21 @@ def test_get_values_returns_404_when_configured_path_is_missing(tmp_path: Path):
 
     assert response.status_code == 404
     assert response.json()["error"] == "LibraryNotFoundError"
+
+
+def test_patch_books_returns_501_for_a_sqlite_backed_library(
+    calibre_metadata_db: Path,
+):
+    # SqliteLibraryGateway est en lecture seule par construction : l'édition
+    # en masse n'est servie qu'en mode PG (pg_dsn).
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.patch(
+        "/libraries/books",
+        params={"tag": "fiction"},
+        json={"ids": ["1"], "patch": {"rating": 3}},
+    )
+
+    assert response.status_code == 501
+    assert response.json()["error"] == "NotImplementedError"
