@@ -27,6 +27,7 @@ from book0_core.models import (
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
+    PagedSeriesResult,
     Publisher,
     Series,
     SeriesItem,
@@ -166,6 +167,36 @@ class HttpLibraryGateway:
             publishers.extend(self._publisher_from_json(row) for row in items)
         return publishers
 
+    def list_series(self) -> list[Series]:
+        response = self._client.get("/libraries/series", params=self._params())
+        self._raise_for_error(response)
+
+        body = response.json()
+        if isinstance(body, dict):
+            return self._collect_all_series_pages(body)
+        return [self._series_from_json(row) for row in body]
+
+    def _collect_all_series_pages(self, first_page: dict[str, object]) -> list[Series]:
+        page_size = first_page["page_size"]
+        page = first_page["page"]
+        items = first_page["items"]  # type: ignore[assignment]
+        series = [self._series_from_json(row) for row in items]  # type: ignore[attr-defined]
+        while page_size and len(items) == page_size:  # type: ignore[arg-type]
+            page += 1  # type: ignore[operator]
+            response = self._client.get(
+                "/libraries/series",
+                params={
+                    **self._params(),
+                    "page": str(page),
+                    "page_size": str(page_size),
+                },
+            )
+            self._raise_for_error(response)
+            next_page = response.json()
+            items = next_page["items"]
+            series.extend(self._series_from_json(row) for row in items)
+        return series
+
     def list_books_page(
         self, page: int, page_size: int, handle: str | None = None
     ) -> PagedBooksResult:
@@ -220,6 +251,24 @@ class HttpLibraryGateway:
             handle=None,
         )
 
+    def list_series_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedSeriesResult:
+        response = self._client.get(
+            "/libraries/series",
+            params={**self._params(), "page": str(page), "page_size": str(page_size)},
+        )
+        self._raise_for_error(response)
+        body = response.json()
+        return PagedSeriesResult(
+            items=tuple(self._series_from_json(row) for row in body["items"]),
+            page=body["page"],
+            page_size=body["page_size"],
+            total_pages=body["total_pages"],
+            has_more_than_shown=body["has_more_than_shown"],
+            handle=None,
+        )
+
     def close_pagination(self, handle: str) -> None:
         pass
 
@@ -266,6 +315,10 @@ class HttpLibraryGateway:
     @staticmethod
     def _publisher_from_json(row: dict[str, object]) -> Publisher:
         return Publisher(id=row["id"], name=row["name"])  # type: ignore[arg-type]
+
+    @staticmethod
+    def _series_from_json(row: dict[str, object]) -> Series:
+        return Series(id=row["id"], name=row["name"])  # type: ignore[arg-type]
 
     def _book_details_from_json(self, row: dict[str, object]) -> BookDetails:
         publisher_row = row["publisher"]

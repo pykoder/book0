@@ -15,6 +15,7 @@ from book0_core.models import (
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
+    PagedSeriesResult,
     Publisher,
     Series,
     SeriesItem,
@@ -49,6 +50,8 @@ _LIST_BOOKS_QUERY = """
 _LIST_AUTHORS_QUERY = "SELECT id, name FROM authors ORDER BY name"
 
 _LIST_PUBLISHERS_QUERY = "SELECT id, name FROM publishers ORDER BY name"
+
+_LIST_SERIES_QUERY = "SELECT id, name FROM series ORDER BY name"
 
 # Authors and tags are aggregated via correlated subqueries, not a direct LEFT JOIN,
 # because joining two many-to-many link tables into the same query would fan out rows
@@ -105,6 +108,9 @@ _LIST_AUTHORS_COUNT_QUERY = "SELECT id FROM authors"
 
 _LIST_PUBLISHERS_QUERY_FROM_OFFSET = _LIST_PUBLISHERS_QUERY + " LIMIT -1 OFFSET ?"
 _LIST_PUBLISHERS_COUNT_QUERY = "SELECT id FROM publishers"
+
+_LIST_SERIES_QUERY_FROM_OFFSET = _LIST_SERIES_QUERY + " LIMIT -1 OFFSET ?"
+_LIST_SERIES_COUNT_QUERY = "SELECT id FROM series"
 
 
 @dataclass
@@ -179,6 +185,12 @@ class SqliteLibraryGateway:
         rows = connection.execute(_LIST_PUBLISHERS_QUERY).fetchall()
 
         return [Publisher(id=str(row[0]), name=row[1]) for row in rows]
+
+    def list_series(self) -> list[Series]:
+        connection = self._connect()
+        rows = connection.execute(_LIST_SERIES_QUERY).fetchall()
+
+        return [Series(id=str(row[0]), name=row[1]) for row in rows]
 
     def get_book_details(self, ids: list[str]) -> BookDetailsResult:
         deduped_ids, valid_ids = self._partition_ids(ids)
@@ -291,6 +303,34 @@ class SqliteLibraryGateway:
         )
         return PagedPublishersResult(
             items=publishers,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=result_handle,
+        )
+
+    def list_series_page(
+        self, page: int, page_size: int, handle: str | None = None
+    ) -> PagedSeriesResult:
+        connection = self._connect()
+        rows, result_handle = self._fetch_page(
+            connection,
+            "series",
+            page,
+            page_size,
+            handle,
+            _LIST_SERIES_QUERY_FROM_OFFSET,
+        )
+        total_pages, has_more = self._bounded_total_pages(
+            connection, _LIST_SERIES_COUNT_QUERY, page_size
+        )
+        series = tuple(
+            Series(id=str(row[0]), name=row[1])  # type: ignore[arg-type]
+            for row in rows
+        )
+        return PagedSeriesResult(
+            items=series,
             page=page,
             page_size=page_size,
             total_pages=total_pages,

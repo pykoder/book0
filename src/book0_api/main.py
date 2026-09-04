@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
@@ -11,7 +12,9 @@ from book0_api.schemas import (
     PagedAuthorsOut,
     PagedBooksOut,
     PagedPublishersOut,
+    PagedSeriesOut,
     PublisherOut,
+    SeriesOut,
 )
 from book0_core.errors import (
     LibraryNotFoundError,
@@ -189,6 +192,50 @@ def create_app(
         if effective_page_size is None:
             return [PublisherOut.from_publisher(publisher) for publisher in publishers]
         return PagedPublishersOut.from_paged_result(paged_result)
+
+    @app.get("/libraries/series", response_model=None)
+    def list_series(
+        tag: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+        sort: Literal["name"] | None = None,
+        order: Literal["asc", "desc"] | None = None,
+    ) -> list[SeriesOut] | PagedSeriesOut | JSONResponse:
+        # Sort whitelist: "name" only, default name,asc - which is exactly what
+        # list_series' fixed ORDER BY name already produces, so sort/order need
+        # no SQL-side handling until a second sort key exists.
+        try:
+            db_path = _resolve_db_path(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
+
+        effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
+
+        gateway = SqliteLibraryGateway(db_path)
+        try:
+            if effective_page_size is None:
+                series = gateway.list_series()
+            else:
+                paged_result = gateway.list_series_page(
+                    _resolve_effective_page(page), effective_page_size
+                )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+        except NotACalibreLibraryError as error:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "NotACalibreLibraryError", "detail": str(error)},
+            )
+
+        if effective_page_size is None:
+            return [SeriesOut.from_series(series) for series in series]
+        return PagedSeriesOut.from_paged_result(paged_result)
 
     @app.post("/libraries/books/detail", response_model=None)
     def get_book_details(

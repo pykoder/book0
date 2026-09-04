@@ -8,6 +8,7 @@ from book0_core.models import (
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
+    PagedSeriesResult,
     Publisher,
     Series,
     SeriesItem,
@@ -134,6 +135,24 @@ class PagedPublishersOut(BaseModel):
             items=[
                 PublisherOut.from_publisher(publisher) for publisher in result.items
             ],
+            page=result.page,
+            page_size=result.page_size,
+            total_pages=result.total_pages,
+            has_more_than_shown=result.has_more_than_shown,
+        )
+
+
+class PagedSeriesOut(BaseModel):
+    items: list[SeriesOut]
+    page: int
+    page_size: int
+    total_pages: int | None
+    has_more_than_shown: bool
+
+    @classmethod
+    def from_paged_result(cls, result: PagedSeriesResult) -> "PagedSeriesOut":
+        return cls(
+            items=[SeriesOut.from_series(series) for series in result.items],
             page=result.page,
             page_size=result.page_size,
             total_pages=result.total_pages,

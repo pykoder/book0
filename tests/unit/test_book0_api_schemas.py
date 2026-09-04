@@ -6,6 +6,7 @@ from book0_api.schemas import (
     PagedAuthorsOut,
     PagedBooksOut,
     PagedPublishersOut,
+    PagedSeriesOut,
     PublisherOut,
     SeriesItemOut,
     SeriesOut,
@@ -18,6 +19,7 @@ from book0_core.models import (
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
+    PagedSeriesResult,
     Publisher,
     Series,
     SeriesItem,
@@ -266,6 +268,28 @@ def test_paged_publishers_out_from_paged_result_converts_publishers():
 
     assert paged_out == PagedPublishersOut(
         items=[PublisherOut.from_publisher(publisher)],
+        page=1,
+        page_size=10,
+        total_pages=1,
+        has_more_than_shown=False,
+    )
+
+
+def test_paged_series_out_from_paged_result_converts_series():
+    series = Series(id="1", name="Dune Chronicles")
+    result = PagedSeriesResult(
+        items=(series,),
+        page=1,
+        page_size=10,
+        total_pages=1,
+        has_more_than_shown=False,
+        handle=None,
+    )
+
+    paged_out = PagedSeriesOut.from_paged_result(result)
+
+    assert paged_out == PagedSeriesOut(
+        items=[SeriesOut.from_series(series)],
         page=1,
         page_size=10,
         total_pages=1,

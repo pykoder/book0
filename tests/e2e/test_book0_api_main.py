@@ -8,6 +8,7 @@ from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
+    CALIBRE_LIBRARY_SERIES,
 )
 
 
@@ -289,6 +290,95 @@ def test_list_publishers_returns_400_when_tag_omitted_and_no_default_configured(
 
     assert response.status_code == 400
     assert response.json()["error"] == "TagRequiredError"
+
+
+def test_list_series_returns_expected_series_for_a_known_tag(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/series", params={"tag": "fiction"})
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"id": series.id, "name": series.name} for series in CALIBRE_LIBRARY_SERIES
+    ]
+
+
+def test_list_series_returns_400_for_an_unknown_tag(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/series", params={"tag": "does-not-exist"})
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "TagRequiredError"
+
+
+def test_list_series_returns_404_when_configured_path_is_missing(tmp_path: Path):
+    app = create_app({"fiction": tmp_path / "does-not-exist.db"})
+    client = TestClient(app)
+
+    response = client.get("/libraries/series", params={"tag": "fiction"})
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "LibraryNotFoundError"
+
+
+def test_list_series_returns_500_when_configured_path_is_not_a_calibre_library(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "not-calibre.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+    app = create_app({"fiction": db_path})
+    client = TestClient(app)
+
+    response = client.get("/libraries/series", params={"tag": "fiction"})
+
+    assert response.status_code == 500
+    assert response.json()["error"] == "NotACalibreLibraryError"
+
+
+def test_list_series_uses_default_tag_when_tag_is_omitted(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db}, default_tag="fiction")
+    client = TestClient(app)
+
+    response = client.get("/libraries/series")
+
+    assert response.status_code == 200
+    assert len(response.json()) == len(CALIBRE_LIBRARY_SERIES)
+
+
+def test_list_series_returns_400_when_tag_omitted_and_no_default_configured(
+    calibre_metadata_db: Path,
+):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/series")
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "TagRequiredError"
+
+
+def test_list_series_accepts_the_whitelisted_name_sort(calibre_metadata_db: Path):
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/series", params={"tag": "fiction", "sort": "name", "order": "asc"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"id": series.id, "name": series.name} for series in CALIBRE_LIBRARY_SERIES
+    ]
 
 
 def test_get_book_details_returns_expected_details_for_a_known_tag(
@@ -690,3 +780,22 @@ def test_list_publishers_returns_a_paginated_response_when_page_size_is_given(
     assert response.status_code == 200
     body = response.json()
     assert [item["name"] for item in body["items"]] == ["Publisher 1", "Publisher 2"]
+
+
+def test_list_series_returns_a_paginated_response_when_page_size_is_given(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db})
+    client = TestClient(app)
+
+    response = client.get(
+        "/libraries/series", params={"tag": "fiction", "page": 1, "page_size": 2}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["name"] for item in body["items"]] == ["Series 1", "Series 2"]
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+    assert body["total_pages"] == 4
+    assert body["has_more_than_shown"] is False

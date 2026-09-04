@@ -12,6 +12,7 @@ from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
+    CALIBRE_LIBRARY_SERIES,
     HOBBIT_DETAILS,
 )
 
@@ -741,6 +742,96 @@ def test_list_publishers_page_last_page_has_no_handle(many_books_db: Path):
     result = gateway.list_publishers_page(4, 2)
 
     assert [publisher.name for publisher in result.items] == ["Publisher 7"]
+    assert result.handle is None
+
+
+def test_list_series_returns_series_sorted_by_name(calibre_metadata_db: Path):
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    assert gateway.list_series() == CALIBRE_LIBRARY_SERIES
+
+
+def test_list_series_opens_the_database_read_only(
+    calibre_metadata_db: Path, monkeypatch: pytest.MonkeyPatch
+):
+    real_connect = sqlite3.connect
+    captured_calls: list[tuple[str, bool]] = []
+
+    def spying_connect(
+        database: str, *args: object, **kwargs: object
+    ) -> sqlite3.Connection:
+        captured_calls.append((str(database), bool(kwargs.get("uri", False))))
+        return real_connect(database, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(sqlite3, "connect", spying_connect)
+    gateway = SqliteLibraryGateway(calibre_metadata_db)
+
+    gateway.list_series()
+
+    assert captured_calls == [(f"file:{calibre_metadata_db}?mode=ro", True)]
+
+
+def test_list_series_resolves_metadata_db_when_given_a_directory(
+    calibre_metadata_db: Path,
+):
+    gateway = SqliteLibraryGateway(calibre_metadata_db.parent)
+
+    assert gateway.list_series() == CALIBRE_LIBRARY_SERIES
+
+
+def test_missing_file_raises_library_not_found_error_for_series(tmp_path: Path):
+    gateway = SqliteLibraryGateway(tmp_path / "does-not-exist.db")
+
+    with pytest.raises(LibraryNotFoundError):
+        gateway.list_series()
+
+
+def test_non_calibre_sqlite_file_raises_not_a_calibre_library_error_for_series(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "not-calibre.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+    gateway = SqliteLibraryGateway(db_path)
+
+    with pytest.raises(NotACalibreLibraryError):
+        gateway.list_series()
+
+
+def test_list_series_page_returns_the_requested_page_in_name_order(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_series_page(1, 2)
+
+    assert [series.name for series in result.items] == ["Series 1", "Series 2"]
+    assert result.page == 1
+    assert result.page_size == 2
+    assert result.total_pages == 4
+
+
+def test_list_series_page_reuses_the_session_for_the_immediate_next_page(
+    many_books_db: Path,
+):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    first = gateway.list_series_page(1, 2)
+    second = gateway.list_series_page(2, 2, handle=first.handle)
+
+    assert [series.name for series in second.items] == ["Series 3", "Series 4"]
+
+
+def test_list_series_page_last_page_has_no_handle(many_books_db: Path):
+    gateway = SqliteLibraryGateway(many_books_db)
+
+    result = gateway.list_series_page(4, 2)
+
+    assert [series.name for series in result.items] == ["Series 7"]
     assert result.handle is None
 
 

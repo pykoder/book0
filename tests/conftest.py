@@ -70,6 +70,12 @@ CALIBRE_LIBRARY_PUBLISHERS = [
     Publisher(id="2", name="Gollancz"),
 ]
 
+# Series as inserted into the fixture DB, already in the order list_series()
+# is expected to return them (sorted by name).
+CALIBRE_LIBRARY_SERIES = [
+    Series(id="1", name="Dune Chronicles"),
+]
+
 # BookDetails for the three books in the fixture DB, covering: a book with a
 # publisher, series, and tags (Dune); a book with none of them (The Hobbit);
 # a book with only some (Good Omens - publisher and tags, no series).
@@ -379,6 +385,10 @@ def many_books_db(tmp_path: Path) -> Path:
         connection.executemany(
             "INSERT INTO publishers (id, name) VALUES (?, ?)",
             [(i, f"Publisher {i}") for i in range(1, 8)],
+        )
+        connection.executemany(
+            "INSERT INTO series (id, name) VALUES (?, ?)",
+            [(i, f"Series {i}") for i in range(1, 8)],
         )
         connection.commit()
     finally:

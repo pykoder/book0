@@ -19,11 +19,13 @@ from book0_core.models import (
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
+    PagedSeriesResult,
 )
 from tests.conftest import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
+    CALIBRE_LIBRARY_SERIES,
 )
 
 
@@ -164,6 +166,48 @@ def test_list_publishers_raises_not_a_calibre_library_error(tmp_path: Path):
 
     with pytest.raises(NotACalibreLibraryError):
         gateway.list_publishers()
+
+
+def test_list_series_returns_expected_series_for_a_known_tag(
+    calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    assert gateway.list_series() == CALIBRE_LIBRARY_SERIES
+
+
+def test_list_series_raises_tag_required_error_for_an_unknown_tag(
+    calibre_metadata_db: Path,
+):
+    client = _client_for({"fiction": calibre_metadata_db})
+    gateway = HttpLibraryGateway(client, "does-not-exist")
+
+    with pytest.raises(TagRequiredError):
+        gateway.list_series()
+
+
+def test_list_series_raises_library_not_found_error(tmp_path: Path):
+    client = _client_for({"fiction": tmp_path / "does-not-exist.db"})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    with pytest.raises(LibraryNotFoundError):
+        gateway.list_series()
+
+
+def test_list_series_raises_not_a_calibre_library_error(tmp_path: Path):
+    db_path = tmp_path / "not-calibre.db"
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+        connection.commit()
+    finally:
+        connection.close()
+    client = _client_for({"fiction": db_path})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    with pytest.raises(NotACalibreLibraryError):
+        gateway.list_series()
 
 
 def test_http_gateway_satisfies_the_library_gateway_protocol(
@@ -468,6 +512,18 @@ def test_list_publishers_page_returns_the_requested_page(many_books_db: Path):
     ]
 
 
+def test_list_series_page_returns_the_requested_page(many_books_db: Path):
+    client = _client_for({"fiction": many_books_db})
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    result: PagedSeriesResult = gateway.list_series_page(1, 2)
+
+    assert [series.name for series in result.items] == ["Series 1", "Series 2"]
+    assert result.page == 1
+    assert result.page_size == 2
+    assert result.total_pages == 4
+
+
 def test_list_books_transparently_fetches_every_page_when_server_forces_pagination(
     many_books_db: Path,
 ):
@@ -504,6 +560,18 @@ def test_list_authors_transparently_fetches_every_page_when_server_forces_pagina
     authors = gateway.list_authors()
 
     assert [author.name for author in authors] == [f"Author {i}" for i in range(1, 8)]
+
+
+def test_list_series_transparently_fetches_every_page_when_server_forces_pagination(
+    many_books_db: Path,
+):
+    app = create_app({"fiction": many_books_db}, default_page_size=2)
+    client = TestClient(app)
+    gateway = HttpLibraryGateway(client, "fiction")
+
+    series = gateway.list_series()
+
+    assert [item.name for item in series] == [f"Series {i}" for i in range(1, 8)]
 
 
 def test_list_books_returns_plain_list_unchanged_when_server_does_not_force_pagination(
