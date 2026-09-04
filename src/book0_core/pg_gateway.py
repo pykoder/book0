@@ -11,19 +11,22 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Literal, cast
 
 import psycopg
 
-from book0_core.errors import LibraryNotFoundError
+from book0_core.errors import InvalidPatchError, LibraryNotFoundError
 from book0_core.models import (
     Author,
     Book,
     BookDetails,
     BookDetailsResult,
+    BookPatch,
     BookQuery,
     BookSort,
+    EditBooksResult,
     FieldValue,
     PagedAuthorsResult,
     PagedBooksResult,
@@ -137,6 +140,10 @@ _GET_BOOK_DETAILS_QUERY_TEMPLATE = f"""
 
 _VALID_ID_PATTERN = re.compile(r"^[1-9]\d*$")
 
+# Échelle Calibre des notes en étoiles (stockée x2 en base : 1..5 -> 2..10).
+_RATING_MIN_STARS = 1
+_RATING_MAX_STARS = 5
+
 _SESSION_TIMEOUT_SECONDS = 60
 _PAGE_COUNT_CAP = 100  # en pages ; le plafond de lignes est _PAGE_COUNT_CAP * page_size
 
@@ -194,6 +201,40 @@ _FACET_QUERIES: dict[str, str] = {
         " ORDER BY count(*) DESC, (ratings.rating / 2)::text"
     ),
 }
+
+
+class _DryRunRollback(Exception):
+    """Sentinelle interne : levée en fin de dry_run pour forcer le ROLLBACK
+    de la transaction psycopg ouverte par Connection.transaction(), capturée
+    à la frontière de edit_books - jamais exposée aux appelants."""
+
+
+def _parse_edit_patch(patch: BookPatch) -> tuple[float | None, date | None]:
+    """Valide les champs patch à convertir (series_index, rating, pubdate) et
+    retourne (series_index en float, pubdate en date). Lève InvalidPatchError
+    sur une valeur non analysable ou hors échelle - avant toute écriture."""
+    series_index: float | None = None
+    if patch.series_index is not None:
+        try:
+            series_index = float(patch.series_index)
+        except ValueError:
+            raise InvalidPatchError(
+                f"series_index invalide : {patch.series_index!r}"
+            ) from None
+    if patch.rating is not None and not (
+        _RATING_MIN_STARS <= patch.rating <= _RATING_MAX_STARS
+    ):
+        raise InvalidPatchError(
+            f"rating hors échelle {_RATING_MIN_STARS}-{_RATING_MAX_STARS}"
+            f" étoiles : {patch.rating}"
+        )
+    pubdate: date | None = None
+    if patch.pubdate is not None:
+        try:
+            pubdate = date.fromisoformat(patch.pubdate)
+        except ValueError:
+            raise InvalidPatchError(f"pubdate invalide : {patch.pubdate!r}") from None
+    return series_index, pubdate
 
 
 def _query_books_where(
@@ -590,6 +631,254 @@ class PgLibraryGateway:
         return [
             FieldValue(value=str(row[0]), count=cast("int", row[1])) for row in rows
         ]
+
+    def edit_books(
+        self, ids: list[str], patch: BookPatch, dry_run: bool = False
+    ) -> EditBooksResult:
+        """PATCH en masse des champs de métadonnées, en une transaction.
+
+        Les ids de livres inconnus sont signalés dans missing_ids (pas une
+        erreur) ; les ids vides ou un patch entièrement None, ainsi qu'un
+        publisher_id/series_id inconnu de la bibliothèque, lèvent
+        InvalidPatchError. dry_run=True rejoue toute la validation et les
+        écritures puis annule la transaction : la réponse est identique à une
+        exécution réelle, sans écriture.
+        """
+        if not ids:
+            raise InvalidPatchError("edit_books : liste d'ids de livres vide")
+        if (
+            patch.publisher_id is None
+            and patch.series_id is None
+            and patch.series_index is None
+            and patch.tags is None
+            and patch.rating is None
+            and patch.pubdate is None
+            and patch.language is None
+            and patch.comments is None
+        ):
+            raise InvalidPatchError("edit_books : patch sans aucun champ à modifier")
+        series_index_value, pubdate_value = _parse_edit_patch(patch)
+
+        deduped_ids, valid_ids = self._partition_ids(ids)
+        try:
+            with self._connection.transaction():
+                updated = self._apply_edit_books(
+                    deduped_ids, valid_ids, patch, series_index_value, pubdate_value
+                )
+                if dry_run:
+                    raise _DryRunRollback
+        except _DryRunRollback:
+            pass  # dry_run : la transaction a déjà été annulée par le context manager
+        found = set(updated)
+        return EditBooksResult(
+            updated=tuple(updated),
+            missing_ids=tuple(id_ for id_ in deduped_ids if id_ not in found),
+        )
+
+    def _apply_edit_books(
+        self,
+        deduped_ids: list[str],
+        valid_ids: list[str],
+        patch: BookPatch,
+        series_index_value: float | None,
+        pubdate_value: date | None,
+    ) -> list[str]:
+        """Applique le patch à chaque livre existant, dans la transaction
+        ouverte par edit_books (verrous FOR UPDATE sur les lignes books).
+        Retourne les ids locaux réellement modifiés, dans l'ordre demandé."""
+        with self._connection.cursor() as cursor:
+            publisher_pk = (
+                self._resolve_entity_id(cursor, "publishers", patch.publisher_id)
+                if patch.publisher_id is not None
+                else None
+            )
+            series_pk = (
+                self._resolve_entity_id(cursor, "series", patch.series_id)
+                if patch.series_id is not None
+                else None
+            )
+            # local_id -> (book_pk, series_index courant) ; FOR UPDATE
+            # verrouille les lignes pour toute la durée du PATCH en masse.
+            book_pks: dict[str, tuple[int, float | None]] = {}
+            if valid_ids:
+                placeholders = ", ".join("%s" for _ in valid_ids)
+                cursor.execute(
+                    "SELECT book_pk, local_id, series_index FROM books"
+                    f" WHERE library_uuid = %s AND local_id IN ({placeholders})"
+                    " ORDER BY local_id FOR UPDATE",
+                    (self._library_uuid, *(int(id_) for id_ in valid_ids)),
+                )
+                book_pks = {
+                    str(row[1]): (int(row[0]), cast("float | None", row[2]))
+                    for row in cursor.fetchall()
+                }
+            updated: list[str] = []
+            for book_id in deduped_ids:
+                if book_id not in book_pks:
+                    continue
+                book_pk, current_series_index = book_pks[book_id]
+                # ord du lien de série : l'index demandé, sinon l'index courant
+                # du livre (Calibre garde books.series_index et
+                # books_series_link.ord synchronisés).
+                series_ord = (
+                    series_index_value
+                    if patch.series_index is not None
+                    else current_series_index
+                )
+                self._apply_book_patch(
+                    cursor,
+                    book_pk,
+                    patch,
+                    publisher_pk,
+                    series_pk,
+                    series_ord,
+                    pubdate_value,
+                )
+                updated.append(book_id)
+            return updated
+
+    def _apply_book_patch(
+        self,
+        cursor: psycopg.Cursor,
+        book_pk: int,
+        patch: BookPatch,
+        publisher_pk: int | None,
+        series_pk: int | None,
+        series_ord: float | None,
+        pubdate_value: date | None,
+    ) -> None:
+        """Écrit chaque champ présent dans le patch pour un livre. Chaque lien
+        est remplacé (delete + insert) ; tags/ratings/languages en
+        get-or-create ; comments en upsert (PK book_pk)."""
+        if publisher_pk is not None:
+            cursor.execute(
+                "DELETE FROM books_publishers_link WHERE book_pk = %s", (book_pk,)
+            )
+            cursor.execute(
+                "INSERT INTO books_publishers_link (book_pk, publisher_id)"
+                " VALUES (%s, %s)",
+                (book_pk, publisher_pk),
+            )
+        if series_pk is not None:
+            cursor.execute(
+                "DELETE FROM books_series_link WHERE book_pk = %s", (book_pk,)
+            )
+            cursor.execute(
+                "INSERT INTO books_series_link (book_pk, series_id, ord)"
+                " VALUES (%s, %s, %s)",
+                (book_pk, series_pk, series_ord),
+            )
+        if patch.series_index is not None:
+            cursor.execute(
+                "UPDATE books SET series_index = %s WHERE book_pk = %s",
+                (series_ord, book_pk),
+            )
+        if patch.tags is not None:
+            cursor.execute("DELETE FROM books_tags_link WHERE book_pk = %s", (book_pk,))
+            for tag_name in patch.tags:
+                tag_id = self._get_or_create_tag(cursor, tag_name)
+                cursor.execute(
+                    "INSERT INTO books_tags_link (book_pk, tag_id) VALUES (%s, %s)",
+                    (book_pk, tag_id),
+                )
+        if patch.rating is not None:
+            rating_id = self._get_or_create_rating(cursor, patch.rating)
+            cursor.execute(
+                "DELETE FROM books_ratings_link WHERE book_pk = %s", (book_pk,)
+            )
+            cursor.execute(
+                "INSERT INTO books_ratings_link (book_pk, rating_id) VALUES (%s, %s)",
+                (book_pk, rating_id),
+            )
+        if pubdate_value is not None:
+            cursor.execute(
+                "UPDATE books SET pubdate = %s WHERE book_pk = %s",
+                (pubdate_value, book_pk),
+            )
+        if patch.language is not None:
+            language_id = self._get_or_create_language(cursor, patch.language)
+            cursor.execute(
+                "DELETE FROM books_languages_link WHERE book_pk = %s", (book_pk,)
+            )
+            cursor.execute(
+                "INSERT INTO books_languages_link (book_pk, language_id, item_order)"
+                " VALUES (%s, %s, 0)",
+                (book_pk, language_id),
+            )
+        if patch.comments is not None:
+            cursor.execute(
+                "INSERT INTO comments (book_pk, text) VALUES (%s, %s)"
+                " ON CONFLICT (book_pk) DO UPDATE SET text = EXCLUDED.text",
+                (book_pk, patch.comments),
+            )
+
+    def _resolve_entity_id(
+        self, cursor: psycopg.Cursor, table: str, local_id: str
+    ) -> int:
+        """Résout un id public (local_id) en id interne BIGSERIAL, en levant
+        InvalidPatchError si l'entité n'existe pas dans la bibliothèque.
+        table vient d'un appel interne à table fixe ('publishers', 'series')."""
+        if not _VALID_ID_PATTERN.fullmatch(local_id):
+            raise InvalidPatchError(f"{table} : id invalide {local_id!r}")
+        cursor.execute(
+            f"SELECT id FROM {table} WHERE library_uuid = %s AND local_id = %s",
+            (self._library_uuid, int(local_id)),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise InvalidPatchError(
+                f"{table} local_id={local_id} introuvable dans la bibliothèque"
+            )
+        return int(row[0])
+
+    def _get_or_create_tag(self, cursor: psycopg.Cursor, name: str) -> int:
+        cursor.execute(
+            "SELECT id FROM tags WHERE library_uuid = %s AND name = %s",
+            (self._library_uuid, name),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            return int(row[0])
+        return self._insert_dimension_row(cursor, "tags", name, "name")
+
+    def _get_or_create_rating(self, cursor: psycopg.Cursor, stars: int) -> int:
+        value = stars * 2  # échelle Calibre 0-10 : 2 points par étoile
+        cursor.execute(
+            "SELECT id FROM ratings WHERE library_uuid = %s AND rating = %s",
+            (self._library_uuid, value),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            return int(row[0])
+        return self._insert_dimension_row(cursor, "ratings", value, "rating")
+
+    def _get_or_create_language(self, cursor: psycopg.Cursor, lang_code: str) -> int:
+        cursor.execute(
+            "SELECT id FROM languages WHERE library_uuid = %s AND lang_code = %s",
+            (self._library_uuid, lang_code),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            return int(row[0])
+        return self._insert_dimension_row(cursor, "languages", lang_code, "lang_code")
+
+    def _insert_dimension_row(
+        self, cursor: psycopg.Cursor, table: str, value: object, column: str
+    ) -> int:
+        """Insère une ligne de dimension (tags/ratings/languages) avec le
+        prochain local_id libre de la bibliothèque et retourne l'id interne."""
+        cursor.execute(
+            f"SELECT COALESCE(MAX(local_id), 0) + 1 FROM {table}"
+            " WHERE library_uuid = %s",
+            (self._library_uuid,),
+        )
+        next_local_id = int(cast("tuple[int, ...]", cursor.fetchone())[0])
+        cursor.execute(
+            f"INSERT INTO {table} (library_uuid, local_id, {column})"
+            " VALUES (%s, %s, %s) RETURNING id",
+            (self._library_uuid, next_local_id, value),
+        )
+        return int(cast("tuple[int, ...]", cursor.fetchone())[0])
 
     def _query_entity_page(
         self,

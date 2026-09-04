@@ -1,11 +1,14 @@
+import psycopg
 import pytest
 
-from book0_core.errors import LibraryNotFoundError
+from book0_core.errors import InvalidPatchError, LibraryNotFoundError
 from book0_core.gateway import ReadLibraryGateway
 from book0_core.models import (
     Author,
+    BookPatch,
     BookQuery,
     BookSort,
+    EditBooksResult,
     Publisher,
     Series,
     SortOrder,
@@ -352,3 +355,246 @@ def test_pg_list_field_values_tags_languages_and_formats(pg_library):
     assert tags == {"classic": 1, "fantasy": 1, "humor": 1, "sci-fi": 1}
     assert languages == {"fra": 3}
     assert formats == {"EPUB": 1}
+
+
+# --- edit_books : PATCH transactionnel avec dry_run (spec §7.1) ---
+# Seed pg_library (identique à la fixture SQLite) : publisher local_id 1 =
+# Ace Books, 2 = Gollancz ; series local_id 1 = Dune Chronicles ; language
+# 'fra' (local_id 1) liée aux 3 livres ; Dune a la note 4 étoiles (raw 8).
+
+
+def _pg_fetchone(dsn, sql, params=()):
+    """SELECT brut pour les champs non exposés par la façade de lecture
+    (comments, books_languages_link, books_series_link.ord)."""
+    conn = psycopg.connect(dsn)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def test_pg_edit_books_change_publisher(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    result = gw.edit_books(["1"], BookPatch(publisher_id="2"))
+
+    assert result == EditBooksResult(updated=("1",), missing_ids=())
+    books = {b.title: b for b in gw.list_books()}
+    assert books["Dune"].publisher == Publisher(id="2", name="Gollancz")
+    gw.close()
+
+
+def test_pg_edit_books_tags_remplace_la_liste(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    gw.edit_books(["1"], BookPatch(tags=("nouveau",)))
+
+    details = gw.get_book_details(["1"])
+    assert details.books[0].tags == ("nouveau",)
+    gw.close()
+
+
+def test_pg_edit_books_tags_vide_efface_la_liste(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    gw.edit_books(["3"], BookPatch(tags=()))
+
+    details = gw.get_book_details(["3"])
+    assert details.books[0].tags == ()
+    gw.close()
+
+
+def test_pg_edit_books_rating_1_5(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    gw.edit_books(["2"], BookPatch(rating=3))
+
+    assert {b.title: b for b in gw.list_books()}["The Hobbit"].rating == 3
+    gw.close()
+
+
+def test_pg_edit_books_rating_remplace_la_ligne_existante(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    gw.edit_books(["1"], BookPatch(rating=2))
+
+    assert {b.title: b for b in gw.list_books()}["Dune"].rating == 2
+    gw.close()
+
+
+def test_pg_edit_books_series_et_series_index(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    gw.edit_books(["2"], BookPatch(series_id="1", series_index="3.5"))
+
+    hobbit = {b.title: b for b in gw.list_books()}["The Hobbit"]
+    assert hobbit.series == Series(id="1", name="Dune Chronicles")
+    assert hobbit.series_index == "3.5"
+    row = _pg_fetchone(
+        pg_library,
+        "SELECT ord FROM books_series_link WHERE book_pk = 2",
+    )
+    assert row == (3.5,)
+    gw.close()
+
+
+def test_pg_edit_books_serie_sans_index_conserve_l_index_courant(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    gw.edit_books(["1"], BookPatch(series_index="7.0"))
+    gw.edit_books(["1"], BookPatch(series_id="1"))
+
+    dune = {b.title: b for b in gw.list_books()}["Dune"]
+    assert dune.series_index == "7.0"
+    row = _pg_fetchone(
+        pg_library,
+        "SELECT ord FROM books_series_link WHERE book_pk = 1",
+    )
+    assert row == (7.0,)
+    gw.close()
+
+
+def test_pg_edit_books_pubdate(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    gw.edit_books(["2"], BookPatch(pubdate="1937-09-21"))
+
+    assert {b.title: b for b in gw.list_books()}["The Hobbit"].pubdate == ("1937-09-21")
+    gw.close()
+
+
+def test_pg_edit_books_language_remplace_le_lien(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    gw.edit_books(["1"], BookPatch(language="eng"))
+
+    languages = {v.value: v.count for v in gw.list_field_values("languages")}
+    assert languages == {"eng": 1, "fra": 2}
+    gw.close()
+
+
+def test_pg_edit_books_comments_upsert(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    gw.edit_books(["1"], BookPatch(comments="Sonate des clairs de terre."))
+    assert _pg_fetchone(pg_library, "SELECT text FROM comments WHERE book_pk = 1") == (
+        "Sonate des clairs de terre.",
+    )
+
+    # Deuxième passe : la PK comments(book_pk) impose un upsert, pas un insert.
+    gw.edit_books(["1"], BookPatch(comments="Mise à jour."))
+    assert _pg_fetchone(pg_library, "SELECT text FROM comments WHERE book_pk = 1") == (
+        "Mise à jour.",
+    )
+    gw.close()
+
+
+def test_pg_edit_books_plusieurs_livres_dans_l_ordre_demande(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    result = gw.edit_books(["3", "1"], BookPatch(rating=5))
+
+    assert result == EditBooksResult(updated=("3", "1"), missing_ids=())
+    books = {b.title: b for b in gw.list_books()}
+    assert books["Good Omens"].rating == 5
+    assert books["Dune"].rating == 5
+    gw.close()
+
+
+def test_pg_edit_books_dry_run_n_ecrit_rien(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    avant = gw.list_books()
+    tags_avant = gw.list_field_values("tags")
+
+    result = gw.edit_books(
+        ["1"],
+        BookPatch(
+            publisher_id="2",
+            series_index="9.9",
+            tags=("nouveau",),
+            rating=1,
+            pubdate="2001-01-01",
+            language="eng",
+            comments="brouillon",
+        ),
+        dry_run=True,
+    )
+
+    # Même réponse qu'une exécution réelle...
+    assert result == EditBooksResult(updated=("1",), missing_ids=())
+    # ...mais aucune écriture, y compris pas de ligne tags orpheline.
+    assert gw.list_books() == avant
+    assert gw.list_field_values("tags") == tags_avant
+    assert (
+        _pg_fetchone(pg_library, "SELECT text FROM comments WHERE book_pk = 1") is None
+    )
+    gw.close()
+
+
+def test_pg_edit_books_ids_inconnus_dans_missing(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    result = gw.edit_books(["1", "9999"], BookPatch(rating=2))
+
+    assert result.updated == ("1",)
+    assert result.missing_ids == ("9999",)
+    assert {b.title: b for b in gw.list_books()}["Dune"].rating == 2
+    gw.close()
+
+
+def test_pg_edit_books_patch_vide_leve_invalid_patch(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidPatchError):
+        gw.edit_books(["1"], BookPatch())
+    gw.close()
+
+
+def test_pg_edit_books_ids_vides_leve_invalid_patch(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidPatchError):
+        gw.edit_books([], BookPatch(rating=3))
+    gw.close()
+
+
+def test_pg_edit_books_publisher_inconnu_leve_invalid_patch(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidPatchError):
+        gw.edit_books(["1"], BookPatch(publisher_id="9999"))
+    gw.close()
+
+
+def test_pg_edit_books_series_inconnue_leve_invalid_patch(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidPatchError):
+        gw.edit_books(["1"], BookPatch(series_id="9999"))
+    gw.close()
+
+
+def test_pg_edit_books_rating_hors_echelle_leve_invalid_patch(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidPatchError):
+        gw.edit_books(["1"], BookPatch(rating=7))
+    gw.close()
+
+
+def test_pg_edit_books_pubdate_invalide_leve_invalid_patch(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidPatchError):
+        gw.edit_books(["1"], BookPatch(pubdate="pas-une-date"))
+    gw.close()
+
+
+def test_pg_edit_books_series_index_invalide_leve_invalid_patch(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidPatchError):
+        gw.edit_books(["1"], BookPatch(series_index="abc"))
+    gw.close()
