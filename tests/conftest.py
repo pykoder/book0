@@ -1,6 +1,12 @@
+import socket
 import sqlite3
+import subprocess
+import time
+import uuid as uuid_module
+from datetime import UTC, datetime
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from book0_core.models import (
@@ -394,3 +400,441 @@ def many_books_db(tmp_path: Path) -> Path:
     finally:
         connection.close()
     return db_path
+
+
+# --- Fixtures PostgreSQL (schéma calibre_pg_sync) ---
+
+# Copie verbatim de la DDL de
+# ../../calibre_pg_sync/src/calibre_pg_sync/schema.sql (miroirs books/authors/...
+# scopés par library_uuid + jobs/author_entity de P1). Le projet book0 ne dépend
+# PAS du paquet calibre_pg_sync - cette constante est la seule source du schéma
+# pour les tests, à resynchroniser manuellement si la DDL source change.
+PG_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS libraries (
+    library_uuid   UUID PRIMARY KEY,
+    name           TEXT NOT NULL,
+    base_path      TEXT NOT NULL,
+    calibre_version TEXT,
+    imported_at    TIMESTAMPTZ DEFAULT now(),
+    last_sync_at   TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS books (
+    book_pk        BIGSERIAL PRIMARY KEY,
+    library_uuid   UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    local_id       INTEGER NOT NULL,
+    uuid           TEXT,
+    title          TEXT NOT NULL,
+    title_sort     TEXT,
+    author_sort    TEXT,
+    pubdate        TIMESTAMPTZ,
+    timestamp      TIMESTAMPTZ,
+    last_modified  TIMESTAMPTZ NOT NULL,
+    series_index   REAL,
+    isbn           TEXT,
+    lccn           TEXT,
+    path           TEXT NOT NULL,
+    flags          INTEGER,
+    has_cover      BOOLEAN,
+    UNIQUE (library_uuid, local_id)
+);
+
+CREATE TABLE IF NOT EXISTS authors (
+    id            BIGSERIAL PRIMARY KEY,
+    library_uuid  UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    local_id      INTEGER NOT NULL,
+    name          TEXT NOT NULL,
+    name_sort     TEXT,
+    link          TEXT,
+    UNIQUE (library_uuid, local_id)
+);
+
+CREATE TABLE IF NOT EXISTS books_authors_link (
+    book_pk      BIGINT NOT NULL REFERENCES books(book_pk) ON DELETE CASCADE,
+    author_id    BIGINT NOT NULL REFERENCES authors(id) ON DELETE CASCADE,
+    PRIMARY KEY (book_pk, author_id)
+);
+
+CREATE TABLE IF NOT EXISTS tags (
+    id            BIGSERIAL PRIMARY KEY,
+    library_uuid  UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    local_id      INTEGER NOT NULL,
+    name          TEXT NOT NULL,
+    UNIQUE (library_uuid, local_id)
+);
+
+CREATE TABLE IF NOT EXISTS books_tags_link (
+    book_pk      BIGINT NOT NULL REFERENCES books(book_pk) ON DELETE CASCADE,
+    tag_id       BIGINT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (book_pk, tag_id)
+);
+
+CREATE TABLE IF NOT EXISTS data (
+    id           BIGSERIAL PRIMARY KEY,
+    book_pk      BIGINT NOT NULL REFERENCES books(book_pk) ON DELETE CASCADE,
+    format       TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    uncompressed_size BIGINT,
+    UNIQUE (book_pk, format)
+);
+
+CREATE TABLE IF NOT EXISTS comments (
+    book_pk      BIGINT PRIMARY KEY REFERENCES books(book_pk) ON DELETE CASCADE,
+    text         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS identifiers (
+    id           BIGSERIAL PRIMARY KEY,
+    book_pk      BIGINT NOT NULL REFERENCES books(book_pk) ON DELETE CASCADE,
+    type         TEXT NOT NULL,
+    val          TEXT NOT NULL,
+    UNIQUE (book_pk, type)
+);
+
+CREATE TABLE IF NOT EXISTS sync_state (
+    library_uuid  UUID PRIMARY KEY REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    last_synced_modified  TIMESTAMPTZ,
+    last_sync_run_at      TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS tombstones (
+    library_uuid  UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    local_id      INTEGER NOT NULL,
+    deleted_at    TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (library_uuid, local_id)
+);
+
+-- Dimensions supplémentaires (spec 2026-08-31-migrate-series-publishers-ratings-languages)
+
+CREATE TABLE IF NOT EXISTS series (
+    id            BIGSERIAL PRIMARY KEY,
+    library_uuid  UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    local_id      INTEGER NOT NULL,
+    name          TEXT NOT NULL,
+    name_sort     TEXT,
+    UNIQUE (library_uuid, local_id)
+);
+
+CREATE TABLE IF NOT EXISTS publishers (
+    id            BIGSERIAL PRIMARY KEY,
+    library_uuid  UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    local_id      INTEGER NOT NULL,
+    name          TEXT NOT NULL,
+    name_sort     TEXT,
+    UNIQUE (library_uuid, local_id)
+);
+
+CREATE TABLE IF NOT EXISTS ratings (
+    id            BIGSERIAL PRIMARY KEY,
+    library_uuid  UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    local_id      INTEGER NOT NULL,
+    rating        INTEGER NOT NULL,
+    UNIQUE (library_uuid, local_id)
+);
+
+CREATE TABLE IF NOT EXISTS languages (
+    id            BIGSERIAL PRIMARY KEY,
+    library_uuid  UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    local_id      INTEGER NOT NULL,
+    lang_code     TEXT NOT NULL,
+    name          TEXT,
+    UNIQUE (library_uuid, local_id)
+);
+
+CREATE TABLE IF NOT EXISTS books_series_link (
+    book_pk      BIGINT NOT NULL REFERENCES books(book_pk) ON DELETE CASCADE,
+    series_id    BIGINT NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+    ord          REAL,
+    PRIMARY KEY (book_pk, series_id)
+);
+
+CREATE TABLE IF NOT EXISTS books_publishers_link (
+    book_pk        BIGINT NOT NULL REFERENCES books(book_pk) ON DELETE CASCADE,
+    publisher_id   BIGINT NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
+    PRIMARY KEY (book_pk, publisher_id)
+);
+
+CREATE TABLE IF NOT EXISTS books_ratings_link (
+    book_pk     BIGINT NOT NULL REFERENCES books(book_pk) ON DELETE CASCADE,
+    rating_id   BIGINT NOT NULL REFERENCES ratings(id) ON DELETE CASCADE,
+    PRIMARY KEY (book_pk, rating_id)
+);
+
+CREATE TABLE IF NOT EXISTS books_languages_link (
+    book_pk      BIGINT NOT NULL REFERENCES books(book_pk) ON DELETE CASCADE,
+    language_id  BIGINT NOT NULL REFERENCES languages(id) ON DELETE CASCADE,
+    item_order   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (book_pk, language_id)
+);
+
+-- Notes et liens (spec 2026-08-31-notes-and-links-design)
+
+ALTER TABLE authors    ADD COLUMN IF NOT EXISTS note TEXT;
+ALTER TABLE series     ADD COLUMN IF NOT EXISTS note TEXT;
+ALTER TABLE publishers ADD COLUMN IF NOT EXISTS note TEXT;
+ALTER TABLE tags       ADD COLUMN IF NOT EXISTS note TEXT;
+
+CREATE TABLE IF NOT EXISTS links (
+    id            BIGSERIAL PRIMARY KEY,
+    library_uuid  UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    entity_type   TEXT NOT NULL CHECK (entity_type IN ('author','series','publisher','tag')),
+    entity_id     BIGINT NOT NULL,
+    url           TEXT NOT NULL,
+    label         TEXT,
+    UNIQUE (entity_type, entity_id, url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_links_entity ON links (entity_type, entity_id);
+
+-- ============================================================
+-- Grimoire API (specs 2026-08-31) : jobs de fond
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id            UUID PRIMARY KEY,
+    library_uuid  UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    action        TEXT NOT NULL CHECK (action IN ('convert-markdown', 'sync-library')),
+    status        TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed', 'interrupted')),
+    params        JSONB,
+    outcome       JSONB,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at    TIMESTAMPTZ,
+    finished_at   TIMESTAMPTZ,
+    CHECK ((status IN ('done', 'failed')) = (outcome IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_library_status_created
+    ON jobs (library_uuid, status, created_at);
+
+-- ============================================================
+-- Grimoire API (specs 2026-08-31) : groupes d'alias d'auteurs
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS author_entity (
+    id                UUID PRIMARY KEY,
+    library_uuid      UUID NOT NULL REFERENCES libraries(library_uuid) ON DELETE CASCADE,
+    display_author_id BIGINT REFERENCES authors(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS author_entity_member (
+    entity_id UUID NOT NULL REFERENCES author_entity(id) ON DELETE CASCADE,
+    author_id BIGINT NOT NULL REFERENCES authors(id) ON DELETE CASCADE,
+    PRIMARY KEY (entity_id, author_id),
+    UNIQUE (author_id)
+);
+"""
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture(scope="session")
+def pg_dsn():
+    """PostgreSQL docker jetable (postgres:16-alpine, port libre, 60 s max)."""
+    port = _free_port()
+    name = f"book0-pgtest-{uuid_module.uuid4().hex[:8]}"
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            name,
+            "-e",
+            "POSTGRES_PASSWORD=test",
+            "-e",
+            "POSTGRES_DB=test",
+            "-p",
+            f"{port}:5432",
+            "postgres:16-alpine",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    dsn = f"postgresql://postgres:test@localhost:{port}/test"
+    try:
+        deadline = time.time() + 60
+        while True:
+            try:
+                psycopg.connect(dsn, connect_timeout=3).close()
+                break
+            except psycopg.OperationalError:
+                if time.time() > deadline:
+                    raise RuntimeError("Conteneur PostgreSQL non prêt après 60 s")
+                time.sleep(1)
+        yield dsn
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+
+
+@pytest.fixture
+def pg_schema(pg_dsn):
+    """Réinitialise le schéma public et applique la DDL calibre_pg_sync."""
+    conn = psycopg.connect(pg_dsn)
+    try:
+        with conn.cursor() as cur:
+            # Ferme les connexions de gateways encore ouvertes par le test
+            # précédent, sinon leur verrou ACCESS SHARE bloque le DROP SCHEMA.
+            cur.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+                " WHERE datname = current_database()"
+                " AND pid <> pg_backend_pid()"
+            )
+            cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+            cur.execute(PG_SCHEMA_SQL)
+        conn.commit()
+        yield conn
+    finally:
+        conn.close()
+
+
+# Bibliothèque seedée : mêmes ids locaux, mêmes noms que la fixture SQLite
+# calibre_metadata_db, pour que les tests SQLite et PG partagent les listes
+# attendues (CALIBRE_LIBRARY_*) et tournent en parallèle.
+GRIMOIRE_TEST_LIBRARY_UUID = "5b1a2c3d-0000-4000-8000-00000000abcd"
+
+
+@pytest.fixture
+def pg_library_root(tmp_path: Path) -> Path:
+    """Répertoire racine de la bibliothèque PG seedée (pour les cover_path)."""
+    root = tmp_path / "grimoire-test"
+    root.mkdir()
+    return root
+
+
+@pytest.fixture
+def pg_library(pg_dsn, pg_schema, pg_library_root: Path) -> str:
+    """Bibliothèque PG 'grimoire-test' seedée à l'identique de calibre_metadata_db."""
+    lib_uuid = GRIMOIRE_TEST_LIBRARY_UUID
+    conn = pg_schema
+    stamp = datetime(2024, 1, 1, tzinfo=UTC)
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO libraries (library_uuid, name, base_path) VALUES (%s, %s, %s)",
+            (lib_uuid, "grimoire-test", str(pg_library_root)),
+        )
+        cur.executemany(
+            "INSERT INTO books (library_uuid, local_id, uuid, title, title_sort,"
+            " author_sort, pubdate, timestamp, last_modified, series_index, path,"
+            " flags, has_cover)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            [
+                (
+                    lib_uuid,
+                    1,
+                    "uuid-book-1",
+                    "Dune",
+                    "Dune",
+                    "Herbert, Frank",
+                    datetime(1965, 8, 1, tzinfo=UTC),
+                    stamp,
+                    stamp,
+                    1.0,
+                    "Frank Herbert/Dune (1)/",
+                    1,
+                    True,
+                ),
+                (
+                    lib_uuid,
+                    2,
+                    "uuid-book-2",
+                    "The Hobbit",
+                    "Hobbit, The",
+                    "Tolkien, J.R.R.",
+                    None,
+                    stamp,
+                    stamp,
+                    None,
+                    "J.R.R. Tolkien/The Hobbit (2)/",
+                    1,
+                    False,
+                ),
+                (
+                    lib_uuid,
+                    3,
+                    "uuid-book-3",
+                    "Good Omens",
+                    "Good Omens",
+                    "Gaiman, Neil, Pratchett, Terry",
+                    datetime(1990, 5, 1, tzinfo=UTC),
+                    stamp,
+                    stamp,
+                    None,
+                    "Neil Gaiman/Good Omens (3)/",
+                    1,
+                    True,
+                ),
+            ],
+        )
+        cur.executemany(
+            "INSERT INTO authors (library_uuid, local_id, name) VALUES (%s, %s, %s)",
+            [
+                (lib_uuid, 1, "Frank Herbert"),
+                (lib_uuid, 2, "J.R.R. Tolkien"),
+                (lib_uuid, 3, "Neil Gaiman"),
+                (lib_uuid, 4, "Terry Pratchett"),
+            ],
+        )
+        cur.executemany(
+            "INSERT INTO books_authors_link (book_pk, author_id) VALUES (%s, %s)",
+            [(1, 1), (2, 2), (3, 3), (3, 4)],
+        )
+        cur.executemany(
+            "INSERT INTO publishers (library_uuid, local_id, name) VALUES (%s, %s, %s)",
+            [(lib_uuid, 1, "Ace Books"), (lib_uuid, 2, "Gollancz")],
+        )
+        cur.executemany(
+            "INSERT INTO books_publishers_link (book_pk, publisher_id) VALUES (%s, %s)",
+            [(1, 1), (3, 2)],
+        )
+        cur.execute(
+            "INSERT INTO series (library_uuid, local_id, name) VALUES (%s, %s, %s)",
+            (lib_uuid, 1, "Dune Chronicles"),
+        )
+        cur.execute(
+            "INSERT INTO books_series_link (book_pk, series_id, ord)"
+            " VALUES (%s, %s, %s)",
+            (1, 1, 1.0),
+        )
+        cur.executemany(
+            "INSERT INTO tags (library_uuid, local_id, name) VALUES (%s, %s, %s)",
+            [
+                (lib_uuid, 1, "sci-fi"),
+                (lib_uuid, 2, "classic"),
+                (lib_uuid, 3, "fantasy"),
+                (lib_uuid, 4, "humor"),
+            ],
+        )
+        cur.executemany(
+            "INSERT INTO books_tags_link (book_pk, tag_id) VALUES (%s, %s)",
+            [(1, 1), (1, 2), (3, 3), (3, 4)],
+        )
+        # Calibre stocke les notes sur 0-10 (2 points par étoile) : id 1 = 4 étoiles.
+        cur.execute(
+            "INSERT INTO ratings (library_uuid, local_id, rating) VALUES (%s, %s, %s)",
+            (lib_uuid, 1, 8),
+        )
+        cur.execute(
+            "INSERT INTO books_ratings_link (book_pk, rating_id) VALUES (%s, %s)",
+            (1, 1),
+        )
+        cur.execute(
+            "INSERT INTO languages (library_uuid, local_id, lang_code, name)"
+            " VALUES (%s, %s, %s, %s)",
+            (lib_uuid, 1, "fra", "French"),
+        )
+        cur.executemany(
+            "INSERT INTO books_languages_link (book_pk, language_id, item_order)"
+            " VALUES (%s, %s, %s)",
+            [(1, 1, 0), (2, 1, 0), (3, 1, 0)],
+        )
+        cur.execute(
+            "INSERT INTO data (book_pk, format, name, uncompressed_size)"
+            " VALUES (%s, %s, %s, %s)",
+            (1, "EPUB", "Dune", 671088),
+        )
+    conn.commit()
+    return pg_dsn

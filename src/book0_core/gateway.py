@@ -1,4 +1,4 @@
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 from book0_core.models import (
     Author,
@@ -15,6 +15,7 @@ from book0_core.models import (
 )
 
 
+@runtime_checkable
 class ReadLibraryGateway(Protocol):
     def list_books(self) -> list[Book]: ...
     def list_authors(self) -> list[Author]: ...
