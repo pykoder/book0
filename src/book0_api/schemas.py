@@ -3,13 +3,17 @@ from pydantic import BaseModel
 from book0_core.models import (
     Author,
     Book,
+    BookContent,
     BookDetails,
     BookDetailsResult,
     BookPatch,
     EditBooksResult,
     FieldValue,
+    Job,
+    JobOutcome,
     PagedAuthorsResult,
     PagedBooksResult,
+    PagedJobsResult,
     PagedPublishersResult,
     PagedSeriesResult,
     Publisher,
@@ -254,6 +258,96 @@ class EditBooksOut(BaseModel):
 
 class BookIdsIn(BaseModel):
     ids: list[str]
+
+
+class JobCreateIn(BaseModel):
+    """Corps de POST /libraries/jobs. action reste un str : c'est la route qui
+    le convertit en enum JobAction pour lever UnknownJobActionError (-> 422)
+    sur une valeur hors énumération, avec le corps d'erreur standard du projet."""
+
+    action: str
+    book_ids: list[str] = []
+    params: dict[str, object] | None = None
+
+
+class JobFailureOut(BaseModel):
+    id: str
+    reason: str
+
+
+class JobOutcomeOut(BaseModel):
+    succeeded: list[str]
+    failed: list[JobFailureOut]
+
+    @classmethod
+    def from_job_outcome(cls, outcome: JobOutcome) -> "JobOutcomeOut":
+        return cls(
+            succeeded=list(outcome.succeeded),
+            failed=[
+                JobFailureOut(id=failure.id, reason=failure.reason)
+                for failure in outcome.failed
+            ],
+        )
+
+
+class JobOut(BaseModel):
+    id: str
+    action: str
+    status: str
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+    outcome: JobOutcomeOut | None
+
+    @classmethod
+    def from_job(cls, job: Job) -> "JobOut":
+        return cls(
+            id=job.id,
+            action=job.action.value,
+            status=job.status.value,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            outcome=(
+                JobOutcomeOut.from_job_outcome(job.outcome)
+                if job.outcome is not None
+                else None
+            ),
+        )
+
+
+class PagedJobsOut(BaseModel):
+    items: list[JobOut]
+    page: int
+    page_size: int
+    total_pages: int | None
+    has_more_than_shown: bool
+
+    @classmethod
+    def from_paged_result(cls, result: PagedJobsResult) -> "PagedJobsOut":
+        return cls(
+            items=[JobOut.from_job(job) for job in result.items],
+            page=result.page,
+            page_size=result.page_size,
+            total_pages=result.total_pages,
+            has_more_than_shown=result.has_more_than_shown,
+        )
+
+
+class BookContentOut(BaseModel):
+    book_id: str
+    level: int
+    extract: str | None
+    markdown: str
+
+    @classmethod
+    def from_book_content(cls, content: BookContent) -> "BookContentOut":
+        return cls(
+            book_id=content.book_id,
+            level=content.level,
+            extract=content.extract,
+            markdown=content.markdown,
+        )
 
 
 class FieldValueOut(BaseModel):

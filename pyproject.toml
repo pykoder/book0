@@ -5,6 +5,7 @@ description = "Calibre book lister"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "calibre-pg-sync",
     "epub2md",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
@@ -36,6 +37,7 @@ testpaths = ["tests"]
 
 [tool.uv.sources]
 epub2md = { path = "../epub2md", editable = true }
+calibre-pg-sync = { path = "../calibre_pg_sync", editable = true }
 
 [dependency-groups]
 dev = [
@@ -46,7 +48,12 @@ dev = [
 ]
 
 [tool.mypy]
-# epub2md (dépendance editable locale) ne publie pas de marqueur py.typed.
+# epub2md et calibre_pg_sync (dépendances editables locales) ne publient pas
+# de marqueur py.typed.
 [[tool.mypy.overrides]]
 module = "epub2md.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "calibre_pg_sync.*"
 ignore_missing_imports = true

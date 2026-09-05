@@ -1,6 +1,11 @@
+from pathlib import Path
+
+import psycopg
 from fastapi.testclient import TestClient
 
+import book0_api.jobs
 from book0_api.main import create_app
+from tests.conftest import GRIMOIRE_TEST_LIBRARY_UUID
 
 
 def test_api_pg_list_books(pg_library):
@@ -176,3 +181,184 @@ def test_api_pg_patch_books_missing_tag_returns_400(pg_library):
 
     assert response.status_code == 400
     assert response.json()["error"] == "TagRequiredError"
+
+
+# --- Jobs de fond + /libraries/jobs + /libraries/books/{id}/content (spec §7.2)
+# NB : TestClient exécute les BackgroundTasks de façon synchrone — un POST job
+# est donc déjà terminé (done/failed) à la réponse 202.
+
+
+def test_post_job_convert_markdown_se_termite_done(pg_library, tmp_path: Path):
+    app = create_app({}, pg_dsn=pg_library, markdown_cache_dir=tmp_path / "md")
+    client = TestClient(app)
+    r = client.post(
+        "/libraries/jobs",
+        params={"tag": "grimoire-test"},
+        json={"action": "convert-markdown", "book_ids": ["1"], "params": {"level": 7}},
+    )
+    assert r.status_code == 202
+    job_id = r.json()["id"]
+    detail = client.get(f"/libraries/jobs/{job_id}").json()
+    assert detail["status"] == "done"
+    assert detail["outcome"]["succeeded"] == ["1"]
+
+
+def test_post_job_convert_markdown_echecs_independants_par_livre(
+    pg_library, tmp_path: Path
+):
+    app = create_app({}, pg_dsn=pg_library, markdown_cache_dir=tmp_path / "md")
+    client = TestClient(app)
+    # 1 : EPUB présent -> succès ; 2 : pas d'EPUB ; 9999 : livre inconnu.
+    r = client.post(
+        "/libraries/jobs",
+        params={"tag": "grimoire-test"},
+        json={"action": "convert-markdown", "book_ids": ["1", "2", "9999"]},
+    )
+    assert r.status_code == 202
+    detail = client.get(f"/libraries/jobs/{r.json()['id']}").json()
+    assert detail["status"] == "done"
+    assert detail["outcome"]["succeeded"] == ["1"]
+    assert detail["outcome"]["failed"] == [
+        {"id": "2", "reason": "NoEpubError"},
+        {"id": "9999", "reason": "BookNotFoundError"},
+    ]
+
+
+def test_post_job_sync_library_appelle_calibre_syncer(pg_library, monkeypatch):
+    calls = []
+
+    class FakeSyncer:
+        def __init__(self, sqlite_path: str, pg_dsn: str) -> None:
+            calls.append((sqlite_path, pg_dsn))
+
+        def run(self) -> None:
+            calls.append(("run",))
+
+    monkeypatch.setattr(book0_api.jobs, "CalibreSyncer", FakeSyncer)
+    app = create_app({}, default_tag="grimoire-test", pg_dsn=pg_library)
+    client = TestClient(app)
+    r = client.post(
+        "/libraries/jobs",
+        json={"action": "sync-library", "book_ids": ["1", "2"]},
+    )
+    assert r.status_code == 202
+    detail = client.get(f"/libraries/jobs/{r.json()['id']}").json()
+    assert detail["status"] == "done"
+    assert detail["outcome"]["succeeded"] == ["1", "2"]
+    assert calls[0][0].endswith("metadata.db")
+    assert calls[0][1] == pg_library
+    assert calls[1] == ("run",)
+
+
+def test_post_job_sync_library_echec_failed_avec_raison(pg_library, monkeypatch):
+    class FailingSyncer:
+        def __init__(self, sqlite_path: str, pg_dsn: str) -> None:
+            pass
+
+        def run(self) -> None:
+            raise RuntimeError("sync catastrophique")
+
+    monkeypatch.setattr(book0_api.jobs, "CalibreSyncer", FailingSyncer)
+    app = create_app({}, default_tag="grimoire-test", pg_dsn=pg_library)
+    client = TestClient(app)
+    r = client.post(
+        "/libraries/jobs",
+        json={"action": "sync-library", "book_ids": ["1"]},
+    )
+    assert r.status_code == 202
+    detail = client.get(f"/libraries/jobs/{r.json()['id']}").json()
+    assert detail["status"] == "failed"
+    assert detail["outcome"]["failed"] == [
+        {"id": detail["id"], "reason": "sync catastrophique"}
+    ]
+
+
+def test_post_job_action_inconnue_422(pg_library):
+    client = TestClient(create_app({}, pg_dsn=pg_library))
+    r = client.post("/libraries/jobs", json={"action": "reindex", "book_ids": []})
+    assert r.status_code == 422 and r.json()["error"] == "UnknownJobActionError"
+
+
+def test_post_job_sqlite_mode_501(calibre_metadata_db: Path):
+    app = create_app({"grimoire-test": calibre_metadata_db})
+    client = TestClient(app)
+    r = client.post(
+        "/libraries/jobs",
+        json={"action": "convert-markdown", "book_ids": ["1"]},
+    )
+    assert r.status_code == 501 and r.json()["error"] == "NotImplementedError"
+
+
+def test_get_jobs_liste_paginee(pg_library):
+    client = TestClient(create_app({}, pg_dsn=pg_library))
+    r = client.get("/libraries/jobs", params={"page": 1, "page_size": 10})
+    assert r.status_code == 200 and "items" in r.json()
+
+
+def test_get_jobs_filtre_valeur_inconnue_422(pg_library):
+    client = TestClient(create_app({}, pg_dsn=pg_library))
+    r = client.get("/libraries/jobs", params={"status": "vaporise"})
+    assert r.status_code == 422 and r.json()["error"] == "UnknownJobActionError"
+    r = client.get("/libraries/jobs", params={"action": "reindex"})
+    assert r.status_code == 422 and r.json()["error"] == "UnknownJobActionError"
+
+
+def test_get_job_inconnu_404(pg_library):
+    client = TestClient(create_app({}, pg_dsn=pg_library))
+    r = client.get("/libraries/jobs/8f3a9c00-0000-0000-0000-000000000000")
+    assert r.status_code == 404 and r.json()["error"] == "UnknownJobError"
+
+
+def test_get_book_content_route(pg_library, tmp_path: Path):
+    client = TestClient(
+        create_app({}, pg_dsn=pg_library, markdown_cache_dir=tmp_path / "md")
+    )
+    r = client.get(
+        "/libraries/books/1/content", params={"tag": "grimoire-test", "level": 7}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["book_id"] == "1" and "markdown" in body
+    assert body["level"] == 7 and body["extract"] is None
+
+
+def test_get_book_content_route_livre_inconnu_404(pg_library):
+    client = TestClient(create_app({}, pg_dsn=pg_library))
+    r = client.get("/libraries/books/9999/content", params={"tag": "grimoire-test"})
+    assert r.status_code == 404 and r.json()["error"] == "BookNotFoundError"
+
+
+def test_get_book_content_route_sans_epub_404(pg_library):
+    client = TestClient(create_app({}, pg_dsn=pg_library))
+    r = client.get("/libraries/books/2/content", params={"tag": "grimoire-test"})
+    assert r.status_code == 404 and r.json()["error"] == "NoEpubError"
+
+
+def test_get_book_content_route_extract_invalide_400(pg_library):
+    client = TestClient(create_app({}, pg_dsn=pg_library))
+    r = client.get(
+        "/libraries/books/1/content",
+        params={"tag": "grimoire-test", "extract": "invalide"},
+    )
+    assert r.status_code == 400 and r.json()["error"] == "InvalidExtractError"
+
+
+def test_job_running_devient_interrupted_au_demarrage(pg_library):
+    # Simule un job interrompu par un arrêt brutal : 'running' en base avant
+    # le démarrage de l'app ; le hook lifespan doit le basculer en
+    # 'interrupted' (TestClient en context manager déclenche la lifespan).
+    job_id = "8f3a9c00-0000-4000-8000-000000000001"
+    with psycopg.connect(pg_library) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO jobs (id, library_uuid, action, status)"
+                " VALUES (%s, %s, 'convert-markdown', 'running')",
+                (job_id, GRIMOIRE_TEST_LIBRARY_UUID),
+            )
+        conn.commit()
+
+    app = create_app({"grimoire-test": Path(".")}, pg_dsn=pg_library)
+    with TestClient(app):
+        detail = TestClient(app).get(f"/libraries/jobs/{job_id}").json()
+    assert detail["status"] == "interrupted"
+    assert detail["finished_at"] is not None

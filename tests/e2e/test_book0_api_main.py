@@ -1063,3 +1063,36 @@ def test_patch_books_returns_501_for_a_sqlite_backed_library(
 
     assert response.status_code == 501
     assert response.json()["error"] == "NotImplementedError"
+
+
+def test_get_book_content_returns_501_for_a_sqlite_backed_library(
+    calibre_metadata_db: Path,
+):
+    # get_book_content (conversion epub2md + cache disque) n'est implémenté
+    # que sur PgLibraryGateway : le mode SQLite reste en 501.
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    response = client.get("/libraries/books/1/content", params={"tag": "fiction"})
+
+    assert response.status_code == 501
+    assert response.json()["error"] == "NotImplementedError"
+
+
+def test_jobs_routes_return_501_for_a_sqlite_backed_library(
+    calibre_metadata_db: Path,
+):
+    # Les jobs (persistance + exécuteur) ne sont servis qu'en mode PG, avant
+    # toute résolution de tag.
+    app = create_app({"fiction": calibre_metadata_db})
+    client = TestClient(app)
+
+    post = client.post(
+        "/libraries/jobs", json={"action": "convert-markdown", "book_ids": ["1"]}
+    )
+    get_list = client.get("/libraries/jobs")
+    get_detail = client.get("/libraries/jobs/8f3a9c00-0000-0000-0000-000000000000")
+
+    for response in (post, get_list, get_detail):
+        assert response.status_code == 501
+        assert response.json()["error"] == "NotImplementedError"

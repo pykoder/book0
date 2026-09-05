@@ -255,6 +255,17 @@ def _job_outcome_from_json(value: object) -> JobOutcome | None:
     )
 
 
+def _job_outcome_to_json(outcome: JobOutcome) -> dict[str, object]:
+    """Sérialise un JobOutcome en jsonb (layout miroir de
+    _job_outcome_from_json : {'succeeded': [...], 'failed': [{id, reason}]})."""
+    return {
+        "succeeded": list(outcome.succeeded),
+        "failed": [
+            {"id": failure.id, "reason": failure.reason} for failure in outcome.failed
+        ],
+    }
+
+
 def _extract_syntax_error_type() -> type[Exception]:
     """Capture au chargement du module le type d'exception levé par
     parse_extract_spec sur une erreur de syntaxe d'extract (un
@@ -406,13 +417,26 @@ class PgLibraryGateway:
     """
 
     def __init__(
-        self, pg_dsn: str, tag: str, markdown_cache_dir: Path | None = None
+        self,
+        pg_dsn: str,
+        tag: str | None = None,
+        markdown_cache_dir: Path | None = None,
     ) -> None:
         # Lectures seules : l'autocommit évite de maintenir une transaction
         # (donc des verrous ACCESS SHARE) ouverte entre deux opérations.
         self._connection = psycopg.connect(pg_dsn, autocommit=True)
         self._sessions: dict[str, _PaginationSession] = {}
+        self._pg_dsn = pg_dsn
         self._markdown_cache_dir = markdown_cache_dir
+        if tag is None:
+            # Passer tag=None construit une passerelle non scopée, réservée
+            # aux lectures globales de jobs (GET /libraries/jobs sans tag) :
+            # les ids de jobs étant des uuid4 uniques, ils n'ont pas besoin de
+            # contexte de bibliothèque. Toute autre méthode (books, authors,
+            # écritures de jobs...) exige une passerelle scopée par tag.
+            self._library_uuid: uuid.UUID | None = None
+            self._library_root: Path | None = None
+            return
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT library_uuid, base_path FROM libraries WHERE name = %s",
@@ -422,11 +446,42 @@ class PgLibraryGateway:
         if row is None:
             self._connection.close()
             raise LibraryNotFoundError(f"Library not found for tag: {tag}")
-        self._library_uuid: uuid.UUID = row[0]
-        self._library_root = Path(row[1])
+        self._library_uuid = uuid.UUID(str(row[0]))
+        self._library_root = Path(str(row[1]))
 
     def close(self) -> None:
         self._connection.close()
+
+    @property
+    def pg_dsn(self) -> str:
+        """DSN PG de connexion (exposé à l'exécuteur sync-library pour
+        construire son CalibreSyncer)."""
+        return self._pg_dsn
+
+    @property
+    def base_path(self) -> Path:
+        """Racine disque de la bibliothèque (colonne libraries.base_path)."""
+        return self._require_library_root()
+
+    def _require_library_uuid(self) -> uuid.UUID:
+        """self._library_uuid narrowé non-None : toute méthode hors lectures
+        globales de jobs exige une passerelle scopée par tag."""
+        if self._library_uuid is None:
+            raise RuntimeError(
+                "this method requires a tag-scoped gateway (tag=None is"
+                " reserved for global job reads)"
+            )
+        return self._library_uuid
+
+    def _require_library_root(self) -> Path:
+        """self._library_root narrowé non-None (même contrat que
+        _require_library_uuid)."""
+        if self._library_root is None:
+            raise RuntimeError(
+                "this method requires a tag-scoped gateway (tag=None is"
+                " reserved for global job reads)"
+            )
+        return self._library_root
 
     def list_books(self) -> list[Book]:
         rows = self._fetch_all(_LIST_BOOKS_QUERY, (self._library_uuid,))
@@ -482,7 +537,9 @@ class PgLibraryGateway:
         for row in rows:
             book_id = str(row[0])
             found_ids.add(book_id)
-            cover_path = self._compute_cover_path(self._library_root, row[10], row[11])
+            cover_path = self._compute_cover_path(
+                self._require_library_root(), row[10], row[11]
+            )
             books.append(
                 BookDetails(
                     id=book_id,
@@ -613,7 +670,7 @@ class PgLibraryGateway:
         self, query: BookQuery, page: int, page_size: int, handle: str | None = None
     ) -> PagedBooksResult:
         params: list[object] = [self._library_uuid]
-        where = _query_books_where(query, params, self._library_uuid)
+        where = _query_books_where(query, params, self._require_library_uuid())
         # Alignement SQLite : ASC place les NULL en premier (d'où NULLS FIRST
         # explicite, le défaut PG étant NULLS LAST), DESC les garde en dernier.
         direction = (
@@ -737,7 +794,7 @@ class PgLibraryGateway:
             data_row = cursor.fetchone()
         if data_row is None:
             raise NoEpubError(f"No EPUB for book local_id={book_id}")
-        epub_path = self._library_root / book_path / f"{data_row[0]}.epub"
+        epub_path = self._require_library_root() / book_path / f"{data_row[0]}.epub"
         if not epub_path.is_file():
             raise NoEpubError(f"EPUB file missing on disk: {epub_path}")
         extract_spec: tuple[str, str, bool] | None = None
@@ -1055,17 +1112,21 @@ class PgLibraryGateway:
         )
 
     def get_job(self, job_id: str) -> Job | None:
-        """Retourne le job demandé de la bibliothèque, None s'il est inconnu
-        (ou si job_id n'est pas un UUID - même sémantique « pas trouvé »)."""
+        """Retourne le job demandé, None s'il est inconnu (ou si job_id n'est
+        pas un UUID - même sémantique « pas trouvé »). Scopé par bibliothèque
+        sur une passerelle taguée ; global sinon (l'id uuid4 est unique)."""
         try:
             job_uuid = uuid.UUID(job_id)
         except ValueError:
             return None
+        if self._library_uuid is None:
+            where = " WHERE id = %s"
+            params: tuple[object, ...] = (job_uuid,)
+        else:
+            where = " WHERE library_uuid = %s AND id = %s"
+            params = (self._library_uuid, job_uuid)
         with self._connection.cursor() as cursor:
-            cursor.execute(
-                _JOBS_QUERY + " WHERE library_uuid = %s AND id = %s",
-                (self._library_uuid, job_uuid),
-            )
+            cursor.execute(_JOBS_QUERY + where, params)
             row = cursor.fetchone()
         return self._job_from_row(row) if row is not None else None
 
@@ -1076,17 +1137,23 @@ class PgLibraryGateway:
         page: int,
         page_size: int,
     ) -> PagedJobsResult:
-        """Liste paginée des jobs de la bibliothèque, triée created_at DESC
-        (id DESC en brise-dégalité), filtres status/action optionnels.
-        Pagination offset SQL simple : le handle est toujours None."""
-        params: list[object] = [self._library_uuid]
-        where = " WHERE library_uuid = %s"
+        """Liste paginée des jobs, triée created_at DESC (id DESC en
+        brise-dégalité), filtres status/action optionnels. Scopée par
+        bibliothèque sur une passerelle taguée ; globale sinon (la console de
+        jobs du serveur liste toutes les bibliothèques). Pagination offset
+        SQL simple : le handle est toujours None."""
+        params: list[object] = []
+        conditions: list[str] = []
+        if self._library_uuid is not None:
+            params.append(self._library_uuid)
+            conditions.append("library_uuid = %s")
         if status is not None:
-            where += " AND status = %s"
+            conditions.append("status = %s")
             params.append(status.value)
         if action is not None:
-            where += " AND action = %s"
+            conditions.append("action = %s")
             params.append(action.value)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
         rows = self._fetch_all(
             _JOBS_QUERY + where + " ORDER BY created_at DESC, id DESC"
             " LIMIT %s OFFSET %s",
@@ -1115,6 +1182,31 @@ class PgLibraryGateway:
                 (self._library_uuid,),
             )
             return cursor.rowcount
+
+    def update_job_status(
+        self, job_id: str, status: JobStatus, outcome: JobOutcome | None = None
+    ) -> None:
+        """Transition de statut pilotée par l'exécuteur de jobs (book0_api) :
+        'running' pose started_at (outcome NULL), 'done'/'failed' posent
+        finished_at et l'outcome. Respecte la contrainte CHECK
+        (status IN ('done','failed')) = (outcome IS NOT NULL)."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE jobs SET status = %s, outcome = %s,"
+                " started_at = CASE WHEN %s = 'running' THEN now()"
+                " ELSE started_at END,"
+                " finished_at = CASE WHEN %s IN ('done', 'failed') THEN now()"
+                " ELSE finished_at END"
+                " WHERE id = %s AND library_uuid = %s",
+                (
+                    status.value,
+                    Json(_job_outcome_to_json(outcome)) if outcome else None,
+                    status.value,
+                    status.value,
+                    uuid.UUID(job_id),
+                    self._library_uuid,
+                ),
+            )
 
     @staticmethod
     def _job_from_row(row: tuple[object, ...]) -> Job:
@@ -1151,7 +1243,7 @@ class PgLibraryGateway:
         l'entité ; l'id public paginé est local_id.
         """
         params: list[object] = [self._library_uuid]
-        where = _query_books_where(query, params, self._library_uuid)
+        where = _query_books_where(query, params, self._require_library_uuid())
         filtered_books = (
             "SELECT books.book_pk FROM books WHERE books.library_uuid = %s"
             + where.replace(" WHERE ", " AND ", 1)

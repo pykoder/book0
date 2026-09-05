@@ -950,3 +950,84 @@ def test_pg_mark_interrupted_jobs(pg_library):
     # Rappel au démarrage sans running restant : plus rien à marquer.
     assert gw.mark_interrupted_jobs() == 0
     gw.close()
+
+
+def test_pg_update_job_status_transitions_excecuteur(pg_library):
+    """Le cycle de l'exécuteur de jobs : running (started_at posé), puis
+    done/failed avec outcome (finished_at posé)."""
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    job = gw.create_job(JobRequest(action=JobAction.CONVERT_MARKDOWN))
+
+    gw.update_job_status(job.id, JobStatus.RUNNING)
+    running = gw.get_job(job.id)
+    assert running is not None
+    assert running.status is JobStatus.RUNNING
+    assert running.started_at is not None
+    assert running.outcome is None
+    assert running.finished_at is None
+
+    outcome = JobOutcome(
+        succeeded=("1",),
+        failed=(JobFailure(id="2", reason="NoEpubError"),),
+    )
+    gw.update_job_status(job.id, JobStatus.DONE, outcome)
+    done = gw.get_job(job.id)
+    assert done is not None
+    assert done.status is JobStatus.DONE
+    assert done.outcome == outcome
+    assert done.finished_at is not None
+
+    failed = gw.create_job(JobRequest(action=JobAction.SYNC_LIBRARY))
+    gw.update_job_status(failed.id, JobStatus.RUNNING)
+    gw.update_job_status(
+        failed.id,
+        JobStatus.FAILED,
+        JobOutcome((), (JobFailure(id=failed.id, reason="boom"),)),
+    )
+    fetched = gw.get_job(failed.id)
+    assert fetched is not None
+    assert fetched.status is JobStatus.FAILED
+    assert fetched.outcome is not None
+    assert fetched.outcome.succeeded == ()
+    assert fetched.outcome.failed[0].reason == "boom"
+    gw.close()
+
+
+def test_pg_lectures_de_jobs_globales_sans_tag(pg_library):
+    """Une passerelle construite sans tag lit les jobs de TOUTES les
+    bibliothèques (console de jobs du serveur) ; une passerelle taguée reste
+    scopée à la sienne."""
+    scoped = PgLibraryGateway(pg_library, "grimoire-test")
+    job_scoped = scoped.create_job(JobRequest(action=JobAction.CONVERT_MARKDOWN))
+
+    # Une seconde bibliothèque avec son propre job (via SQL direct : le
+    # gateway est toujours scopé à un seul tag par construction).
+    other_uuid = uuid.uuid4()
+    other_job_id = uuid.uuid4()
+    with psycopg.connect(pg_library) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO libraries (library_uuid, name, base_path)"
+                " VALUES (%s, %s, %s)",
+                (other_uuid, "autre-lib", "/tmp/autre-lib"),
+            )
+            cur.execute(
+                "INSERT INTO jobs (id, library_uuid, action, status)"
+                " VALUES (%s, %s, 'sync-library', 'pending')",
+                (other_job_id, other_uuid),
+            )
+        conn.commit()
+
+    # Lecture scopée : le job de l'autre bibliothèque est invisible.
+    assert scoped.get_job(str(other_job_id)) is None
+    page = scoped.list_jobs_page(None, None, 1, 10)
+    assert [j.id for j in page.items] == [job_scoped.id]
+    scoped.close()
+
+    # Lecture globale (sans tag) : les jobs des deux bibliothèques.
+    unscoped = PgLibraryGateway(pg_library)
+    assert unscoped.get_job(str(other_job_id)) is not None
+    assert unscoped.get_job(job_scoped.id) is not None
+    all_ids = {j.id for j in unscoped.list_jobs_page(None, None, 1, 10).items}
+    assert all_ids == {job_scoped.id, str(other_job_id)}
+    unscoped.close()

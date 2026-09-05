@@ -1,20 +1,26 @@
-from contextlib import closing
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
 from fastapi.responses import JSONResponse, Response
 
 from book0_api.filters import parse_id_list, parse_int_list, parse_text_list
+from book0_api.jobs import run_job
 from book0_api.schemas import (
     AuthorOut,
+    BookContentOut,
     BookDetailsResultOut,
     BookIdsIn,
     BookOut,
     EditBooksOut,
     FieldValueOut,
+    JobCreateIn,
+    JobOut,
     PagedAuthorsOut,
     PagedBooksOut,
+    PagedJobsOut,
     PagedPublishersOut,
     PagedSeriesOut,
     PatchBooksIn,
@@ -22,13 +28,24 @@ from book0_api.schemas import (
     SeriesOut,
 )
 from book0_core.errors import (
+    BookNotFoundError,
+    InvalidExtractError,
     InvalidFilterError,
     InvalidPatchError,
     LibraryNotFoundError,
+    NoEpubError,
     NotACalibreLibraryError,
     TagRequiredError,
+    UnknownJobActionError,
 )
-from book0_core.models import BookQuery, BookSort, SortOrder
+from book0_core.models import (
+    BookQuery,
+    BookSort,
+    JobAction,
+    JobRequest,
+    JobStatus,
+    SortOrder,
+)
 from book0_core.pg_gateway import PgLibraryGateway
 from book0_core.sqlite_gateway import SqliteLibraryGateway
 
@@ -42,6 +59,9 @@ _FACET_FIELDS: dict[str, _FacetField] = {
     "formats": "formats",
     "ratings": "ratings",
 }
+
+# Enums acceptés en valeur de filtre sur GET /libraries/jobs (status/action) :
+# une valeur hors énumération lève UnknownJobActionError (-> 422).
 
 # Page size used by the query_*_page routes when the request carries filters
 # but no explicit pagination: a single oversized page returns everything the
@@ -57,6 +77,21 @@ def _cover_not_found(id: str) -> JSONResponse:
             "detail": f"No cover found for book {id}",
         },
     )
+
+
+def _parse_job_enum[T: (JobAction, JobStatus)](
+    value: str | None, enum_type: type[T], field: str
+) -> T | None:
+    """Convertit un filtre status/action de GET /libraries/jobs en valeur
+    d'enum ; une valeur hors énumération lève UnknownJobActionError (-> 422)."""
+    if value is None:
+        return None
+    try:
+        return enum_type(value)
+    except ValueError:
+        raise UnknownJobActionError(
+            f"paramètre '{field}' : valeur inconnue : {value!r}"
+        ) from None
 
 
 def _resolve_effective_page(page: int | None) -> int:
@@ -180,8 +215,21 @@ def create_app(
     default_tag: str | None = None,
     default_page_size: int | None = None,
     pg_dsn: str | None = None,
+    markdown_cache_dir: Path | None = None,
 ) -> FastAPI:
-    app = FastAPI()
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        # Un job 'running' survivant d'un arrêt brutal ne reprendra jamais :
+        # au démarrage, chaque bibliothèque configurée bascule ses jobs
+        # 'running' en 'interrupted'. Sans PG (mode SQLite), rien à faire.
+        if pg_dsn is not None:
+            for configured_tag in libraries:
+                gateway = PgLibraryGateway(pg_dsn, configured_tag, markdown_cache_dir)
+                with closing(gateway):
+                    gateway.mark_interrupted_jobs()
+        yield
+
+    app = FastAPI(lifespan=lifespan)
 
     def _resolve_gateway(tag: str | None) -> PgLibraryGateway | SqliteLibraryGateway:
         resolved_tag = tag if tag is not None else default_tag
@@ -192,11 +240,22 @@ def create_app(
         if pg_dsn is not None:
             # Toutes les routes basculent sur PG ; le dict libraries de chemins
             # est ignoré. Un tag inconnu lève LibraryNotFoundError (-> 404).
-            return PgLibraryGateway(pg_dsn, resolved_tag)
+            return PgLibraryGateway(pg_dsn, resolved_tag, markdown_cache_dir)
         db_path = libraries.get(resolved_tag)
         if db_path is None:
             raise TagRequiredError(f"Unknown library tag: {resolved_tag!r}")
         return SqliteLibraryGateway(db_path)
+
+    def _resolve_jobs_gateway(dsn: str, tag: str | None) -> PgLibraryGateway:
+        """Résolution de gateway spécifique aux lectures de jobs (GET
+        /libraries/jobs*) : un tag explicite (ou le default-library) scope les
+        jobs à sa bibliothèque, mais son absence n'est pas une erreur — les
+        ids de jobs étant des uuid4, les lectures se font alors sur toutes les
+        bibliothèques (console de jobs du serveur). Un tag explicite inconnu
+        lève LibraryNotFoundError (-> 404). Mode PG uniquement (la route
+        répond 501 en SQLite avant d'appeler)."""
+        resolved_tag = tag if tag is not None else default_tag
+        return PgLibraryGateway(dsn, resolved_tag, markdown_cache_dir)
 
     @app.get("/libraries/books", response_model=None)
     def list_books(
@@ -722,5 +781,218 @@ def create_app(
             return Response(
                 content=Path(cover_path).read_bytes(), media_type="image/jpeg"
             )
+
+    @app.get("/libraries/books/{id}/content", response_model=None)
+    def get_book_content(
+        id: str,
+        tag: str | None = None,
+        level: int = 7,
+        extract: str | None = None,
+    ) -> BookContentOut | JSONResponse:
+        try:
+            gateway = _resolve_gateway(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+
+        with closing(gateway):
+            if not isinstance(gateway, PgLibraryGateway):
+                # get_book_content (conversion epub2md + cache disque) n'est
+                # implémenté que sur PgLibraryGateway : le mode SQLite reste
+                # en 501, même convention que PATCH /libraries/books.
+                return JSONResponse(
+                    status_code=501,
+                    content={
+                        "error": "NotImplementedError",
+                        "detail": (
+                            "GET /libraries/books/{id}/content requires a"
+                            " PG-backed library"
+                        ),
+                    },
+                )
+            try:
+                content = gateway.get_book_content(id, level, extract)
+            except BookNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "BookNotFoundError", "detail": str(error)},
+                )
+            except NoEpubError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "NoEpubError", "detail": str(error)},
+                )
+            except InvalidExtractError as error:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "InvalidExtractError", "detail": str(error)},
+                )
+
+            return BookContentOut.from_book_content(content)
+
+    @app.post("/libraries/jobs", response_model=None)
+    def create_job(
+        body: JobCreateIn,
+        background_tasks: BackgroundTasks,
+        tag: str | None = None,
+    ) -> JSONResponse:
+        try:
+            action = JobAction(body.action)
+        except ValueError:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": "UnknownJobActionError",
+                    "detail": f"action : valeur inconnue : {body.action!r}",
+                },
+            )
+
+        if pg_dsn is None:
+            # Les jobs de fond ne s'exécutent qu'en mode PG (écritures
+            # job/outcome + exécuteur) : le mode SQLite reste en 501, et ce
+            # avant toute résolution de tag (le test e2e n'en passe pas).
+            return JSONResponse(
+                status_code=501,
+                content={
+                    "error": "NotImplementedError",
+                    "detail": "POST /libraries/jobs requires a PG-backed library",
+                },
+            )
+
+        try:
+            gateway = _resolve_gateway(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+
+        if not isinstance(gateway, PgLibraryGateway):
+            return JSONResponse(
+                status_code=501,
+                content={
+                    "error": "NotImplementedError",
+                    "detail": "POST /libraries/jobs requires a PG-backed library",
+                },
+            )
+        job = gateway.create_job(
+            JobRequest(
+                action=action,
+                book_ids=tuple(body.book_ids),
+                params=body.params,
+            )
+        )
+        # Le gateway n'est PAS fermé ici : run_job l'exécute après la réponse
+        # et en prend possession (fermeture dans son finally).
+        background_tasks.add_task(
+            run_job,
+            gateway,
+            job.id,
+            action,
+            tuple(body.book_ids),
+            body.params,
+        )
+        return JSONResponse(
+            status_code=202, content={"id": job.id, "status": "pending"}
+        )
+
+    @app.get("/libraries/jobs", response_model=None)
+    def list_jobs(
+        tag: str | None = None,
+        status: str | None = None,
+        action: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ) -> PagedJobsOut | JSONResponse:
+        try:
+            job_status = _parse_job_enum(status, JobStatus, "status")
+            job_action = _parse_job_enum(action, JobAction, "action")
+        except UnknownJobActionError as error:
+            return JSONResponse(
+                status_code=422,
+                content={"error": "UnknownJobActionError", "detail": str(error)},
+            )
+
+        if pg_dsn is None:
+            # Les jobs ne sont persistés qu'en PG : le mode SQLite reste en
+            # 501, même convention que POST /libraries/jobs.
+            return JSONResponse(
+                status_code=501,
+                content={
+                    "error": "NotImplementedError",
+                    "detail": "GET /libraries/jobs requires a PG-backed library",
+                },
+            )
+
+        try:
+            gateway = _resolve_jobs_gateway(pg_dsn, tag)
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+
+        # Pas de variante non paginée pour les jobs : sans page_size explicite
+        # (ni default_page_size serveur), une seule page surdimensionnée
+        # rend tout, même convention que les routes query_*_page.
+        effective_page_size = _resolve_effective_page_size(page_size, default_page_size)
+
+        with closing(gateway):
+            paged_result = gateway.list_jobs_page(
+                job_status,
+                job_action,
+                _resolve_effective_page(page),
+                (
+                    effective_page_size
+                    if effective_page_size is not None
+                    else _QUERY_ALL_PAGE_SIZE
+                ),
+            )
+            return PagedJobsOut.from_paged_result(paged_result)
+
+    @app.get("/libraries/jobs/{job_id}", response_model=None)
+    def get_job(job_id: str, tag: str | None = None) -> JobOut | JSONResponse:
+        if pg_dsn is None:
+            return JSONResponse(
+                status_code=501,
+                content={
+                    "error": "NotImplementedError",
+                    "detail": "GET /libraries/jobs requires a PG-backed library",
+                },
+            )
+
+        try:
+            gateway = _resolve_jobs_gateway(pg_dsn, tag)
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+
+        with closing(gateway):
+            job = gateway.get_job(job_id)
+            if job is None:
+                # get_job renvoie aussi None pour un job_id non-UUID :
+                # même sémantique « pas trouvé » (-> 404).
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "error": "UnknownJobError",
+                        "detail": f"Job not found: {job_id}",
+                    },
+                )
+            return JobOut.from_job(job)
 
     return app

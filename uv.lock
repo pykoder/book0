@@ -96,6 +96,7 @@ name = "book0"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "calibre-pg-sync" },
     { name = "epub2md" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -113,6 +114,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "calibre-pg-sync", editable = "../calibre_pg_sync" },
     { name = "epub2md", editable = "../epub2md" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "httpx", specifier = ">=0.28.1" },
@@ -139,6 +141,24 @@ sdist = { url = "https://files.pythonhosted.org/packages/c9/aa/4acaf814ff901145d
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/bb/bf7aab772a159614954d84aa832c129624ba6c32faa559dfb200a534e50b/bs4-0.0.2-py2.py3-none-any.whl", hash = "sha256:abf8742c0805ef7f662dce4b51cca104cffe52b835238afc169142ab9b3fbccc", size = 1189, upload-time = "2024-01-17T18:15:48.613Z" },
 ]
+
+[[package]]
+name = "calibre-pg-sync"
+version = "0.1.0"
+source = { editable = "../calibre_pg_sync" }
+dependencies = [
+    { name = "markdownify" },
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "markdownify", specifier = ">=1.2.3" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "certifi"

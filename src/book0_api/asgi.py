@@ -7,5 +7,9 @@ from book0_config.config import load_libraries
 
 config = load_libraries(Path(os.environ[CONFIG_ENV_VAR]))
 app = create_app(
-    config.libraries, config.default_tag, config.default_page_size, config.pg_dsn
+    config.libraries,
+    config.default_tag,
+    config.default_page_size,
+    config.pg_dsn,
+    Path(config.markdown_cache_dir) if config.markdown_cache_dir else None,
 )
