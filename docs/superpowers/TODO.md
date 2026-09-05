@@ -50,3 +50,11 @@ concrete; the commit or plan that resolves an item removes its line.
   correctly if placed before any `[table]` header, since TOML folds anything written after one
   into that table — hit exactly this way (2026-08-28) via `book0-api.toml`. Revisit via
   brainstorming; affects `book0_config/config.py` and `book0_cli_remote/config.py`.
+
+- [ ] **epub2md's `parse_extract_spec` should raise a domain error instead of
+  `argparse.ArgumentTypeError` for syntax errors.** Its semantic failures are plain
+  `ValueError` (via `apply_extract`) but its syntax failures are `argparse.ArgumentTypeError`,
+  forcing `book0_core/pg_gateway.py` to proxy exception types through an import-time probe
+  (`_extract_syntax_error_type`) to avoid the argparse dependency forbidden for `book0_core`.
+  Deferred (2026-09-03): epub2md's API is frozen by the P1 plan — revisit when an epub2md
+  breaking change becomes acceptable.

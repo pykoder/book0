@@ -7,7 +7,7 @@ SQLite - tandis que les BIGSERIAL (book_pk, authors.id, ...) restent
 internes au module.
 """
 
-import argparse
+import hashlib
 import re
 import time
 import uuid
@@ -214,6 +214,26 @@ _FACET_QUERIES: dict[str, str] = {
         " ORDER BY count(*) DESC, (ratings.rating / 2)::text"
     ),
 }
+
+
+def _extract_syntax_error_type() -> type[Exception]:
+    """Capture au chargement du module le type d'exception levé par
+    parse_extract_spec sur une erreur de syntaxe d'extract (un
+    argparse.ArgumentTypeError côté epub2md), sans que book0_core dépende
+    d'argparse - voir CLAUDE.md, dépendances interdites pour book0_core."""
+    try:
+        parse_extract_spec("not a spec")
+    except ValueError:
+        return ValueError  # pragma: no cover — "not a spec" est une erreur de syntaxe
+    except Exception as e:  # noqa: BLE001 — capture du type seul, pas un silencieux
+        return type(e)
+    return ValueError  # pragma: no cover
+
+
+_EXTRACT_ERRORS: tuple[type[Exception], ...] = (
+    ValueError,
+    _extract_syntax_error_type(),
+)
 
 
 class _DryRunRollback(Exception):
@@ -652,9 +672,11 @@ class PgLibraryGateway:
         self, book_id: str, level: int, extract: str | None
     ) -> BookContent:
         """Convertis l'EPUB d'un livre en markdown via epub2md, avec cache
-        disque clé par (book_id, level, mtime de l'EPUB) : le cache est
-        invalidé dès que l'EPUB change sur disque. markdown_cache_dir=None
-        (constructeur) désactive le cache - conversion à chaque appel."""
+        disque clé par (book_id, level, mtime de l'EPUB, hash court de
+        l'extract) : le cache est invalidé dès que l'EPUB change sur disque et
+        deux extracts distincts ne partagent jamais une entrée.
+        markdown_cache_dir=None (constructeur) désactive le cache - conversion
+        à chaque appel."""
         if not _LEVEL_MIN <= level <= _LEVEL_MAX:
             raise InvalidExtractError(f"level hors {_LEVEL_MIN}-{_LEVEL_MAX} : {level}")
         if not _VALID_ID_PATTERN.fullmatch(book_id):
@@ -683,15 +705,18 @@ class PgLibraryGateway:
         if extract is not None:
             try:
                 extract_spec = parse_extract_spec(extract)
-            except argparse.ArgumentTypeError as exc:
+            except _EXTRACT_ERRORS as exc:
                 raise InvalidExtractError(
                     f"extract invalide : {extract!r} ({exc})"
                 ) from None
 
         cache_path: Path | None = None
         if self._markdown_cache_dir is not None:
+            # La clé intègre un hash court de l'extract demandé : deux extracts
+            # distincts au même level/mtime ne doivent pas partager un fichier.
+            extract_digest = hashlib.sha256((extract or "").encode()).hexdigest()[:12]
             cache_path = self._markdown_cache_dir / (
-                f"{book_id}-{level}-{int(epub_path.stat().st_mtime)}.md"
+                f"{book_id}-{level}-{int(epub_path.stat().st_mtime)}-{extract_digest}.md"
             )
             if cache_path.is_file():
                 return BookContent(
@@ -701,7 +726,15 @@ class PgLibraryGateway:
                     markdown=cache_path.read_text(encoding="utf-8"),
                 )
 
-        markdown = build_markdown(epub_path, level, extract=extract_spec)
+        try:
+            markdown = build_markdown(epub_path, level, extract=extract_spec)
+        except ValueError as exc:
+            # ValueError sémantique d'epub2md (apply_extract : numéro absent du
+            # document, fin avant début) : c'est un extract invalide au sens du
+            # contrat, pas une erreur interne à fuir.
+            raise InvalidExtractError(
+                f"extract invalide : {extract!r} ({exc})"
+            ) from None
         if cache_path is not None:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(markdown, encoding="utf-8")

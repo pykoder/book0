@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 import psycopg
@@ -618,6 +619,11 @@ def _dune_epub_path(pg_library_root):
     return pg_library_root / PG_DUNE_EPUB_RELATIVE
 
 
+def _cache_filename(book_id, level, epub_mtime, extract):
+    digest = hashlib.sha256((extract or "").encode()).hexdigest()[:12]
+    return f"{book_id}-{level}-{int(epub_mtime)}-{digest}.md"
+
+
 def test_pg_get_book_content_convertit(pg_library):
     gw = PgLibraryGateway(pg_library, "grimoire-test")
 
@@ -693,7 +699,7 @@ def test_pg_get_book_content_cache_reutilise(pg_library, pg_library_root, tmp_pa
 
     first = gw.get_book_content("1", 7, None)
 
-    cached = cache_dir / f"1-7-{epub_mtime}.md"
+    cached = cache_dir / _cache_filename("1", 7, epub_mtime, None)
     assert cached.is_file()
     assert cached.read_text(encoding="utf-8") == first.markdown
 
@@ -730,5 +736,38 @@ def test_pg_get_book_content_cache_invalide_si_epub_change(
     second = gw.get_book_content("1", 7, None)
 
     assert second.markdown == first.markdown  # reconverti, pas l'ancien cache
-    assert (cache_dir / f"1-7-{new_mtime}.md").is_file()
+    assert (cache_dir / _cache_filename("1", 7, new_mtime, None)).is_file()
+    gw.close()
+
+
+def test_pg_get_book_content_cache_keys_distinctes_par_extract(
+    pg_library, pg_library_root, tmp_path
+):
+    # Deux extracts distincts, même livre/level/mtime : deux fichiers de cache
+    # distincts, chacun servant le markdown de son extract demandé.
+    cache_dir = tmp_path / "mdcache"
+    gw = PgLibraryGateway(pg_library, "grimoire-test", markdown_cache_dir=cache_dir)
+    epub_mtime = int(_dune_epub_path(pg_library_root).stat().st_mtime)
+
+    first = gw.get_book_content("1", 7, "1...1")
+    second = gw.get_book_content("1", 7, "1...2")
+
+    cache_first = cache_dir / _cache_filename("1", 7, epub_mtime, "1...1")
+    cache_second = cache_dir / _cache_filename("1", 7, epub_mtime, "1...2")
+    assert cache_first.is_file() and cache_second.is_file()
+    assert cache_first != cache_second
+    assert cache_first.read_text(encoding="utf-8") == first.markdown
+    assert cache_second.read_text(encoding="utf-8") == second.markdown
+    assert "Chapitre 1" in first.markdown and "Chapitre 2" not in first.markdown
+    assert "Chapitre 2" in second.markdown
+    gw.close()
+
+
+def test_pg_get_book_content_extract_absent_du_document(pg_library):
+    # Numéro d'élément inexistant dans l'EPUB : ValueError sémantique d'epub2md
+    # (apply_extract), mappée en InvalidExtractError comme tout extract invalide.
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidExtractError):
+        gw.get_book_content("1", 7, "9...9")
     gw.close()
