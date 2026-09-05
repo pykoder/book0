@@ -71,3 +71,9 @@ concrete; the commit or plan that resolves an item removes its line.
   même PG s'interrompraient mutuellement leurs jobs en cours. Option : marquer par instance
   (colonne owner/hostname) si le multi-serveur devient un objectif.
   Deferred (2026-09-03) : déploiement mono-serveur assumé.
+
+- **`apply_author_name` ne met pas à jour `books.author_sort`** — après un renommage/fusion,
+  la colonne de tri conserve l'ancienne graphie ; `BookSort.AUTHOR` (PG, P2 T9) lira donc
+  l'ancien nom jusqu'à une resync externe. Options : recalcul de `author_sort` dans la même
+  transaction, ou documenter que la fraîcheur dépend du sync Calibre.
+  Deferred (2026-09-03) : le plan P3 ne demandait pas la maintenance d'author_sort.
