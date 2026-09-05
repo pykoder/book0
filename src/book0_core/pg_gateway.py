@@ -1172,15 +1172,25 @@ class PgLibraryGateway:
         )
 
     def mark_interrupted_jobs(self) -> int:
-        """Bascule les jobs 'running' de la bibliothèque en 'interrupted'
-        (un job running sans processus vivant l'est forcément après un
-        redémarrage) ; retourne le nombre de lignes mises à jour."""
-        with self._connection.cursor() as cursor:
-            cursor.execute(
+        """Bascule les jobs 'running' en 'interrupted' (un job running sans
+        processus vivant l'est forcément après un redémarrage) ; retourne le
+        nombre de lignes mises à jour. Scopée par bibliothèque sur une
+        passerelle taguée ; globale sinon (au démarrage du serveur, une seule
+        passe couvre toutes les bibliothèques PG)."""
+        if self._library_uuid is None:
+            query = (
                 "UPDATE jobs SET status = 'interrupted', finished_at = now()"
-                " WHERE status = 'running' AND library_uuid = %s",
-                (self._library_uuid,),
+                " WHERE status = 'running'"
             )
+            params: tuple[object, ...] = ()
+        else:
+            query = (
+                "UPDATE jobs SET status = 'interrupted', finished_at = now()"
+                " WHERE status = 'running' AND library_uuid = %s"
+            )
+            params = (self._library_uuid,)
+        with self._connection.cursor() as cursor:
+            cursor.execute(query, params)
             return cursor.rowcount
 
     def update_job_status(

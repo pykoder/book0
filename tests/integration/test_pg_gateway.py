@@ -37,6 +37,7 @@ from tests.conftest import (
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
     CALIBRE_LIBRARY_SERIES,
+    GRIMOIRE_TEST_LIBRARY_UUID,
     PG_DUNE_EPUB_RELATIVE,
     _expected_details_with_cover,
 )
@@ -949,6 +950,42 @@ def test_pg_mark_interrupted_jobs(pg_library):
     assert untouched is not None and untouched.status is JobStatus.PENDING
     # Rappel au démarrage sans running restant : plus rien à marquer.
     assert gw.mark_interrupted_jobs() == 0
+    gw.close()
+
+
+def test_pg_mark_interrupted_jobs_sans_tag_couvre_toutes_les_bibliotheques(
+    pg_library,
+):
+    # Passerelle non scopée (tag=None, celle du hook lifespan du serveur) :
+    # mark_interrupted_jobs couvre TOUTES les bibliothèques PG, pas seulement
+    # une configurée dans le dict de config (vide en déploiement PG réel).
+    gw = PgLibraryGateway(pg_library)
+    other_uuid = "5b1a2c3d-0000-4000-8000-00000000ffff"
+    job_a = "8f3a9c00-0000-4000-8000-0000000000aa"
+    job_b = "8f3a9c00-0000-4000-8000-0000000000bb"
+    with gw._connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO libraries (library_uuid, name, base_path)"
+            " VALUES (%s, 'autre-lib', '/tmp/autre-lib')",
+            (other_uuid,),
+        )
+        cur.executemany(
+            "INSERT INTO jobs (id, library_uuid, action, status)"
+            " VALUES (%s, %s, 'convert-markdown', 'running')",
+            [
+                (job_a, uuid.UUID(GRIMOIRE_TEST_LIBRARY_UUID)),
+                (job_b, other_uuid),
+            ],
+        )
+
+    assert gw.mark_interrupted_jobs() == 2
+
+    with gw._connection.cursor() as cur:
+        cur.execute(
+            "SELECT id, status FROM jobs WHERE status = 'interrupted' ORDER BY id"
+        )
+        rows = cur.fetchall()
+    assert [str(row[0]) for row in rows] == sorted([job_a, job_b])
     gw.close()
 
 

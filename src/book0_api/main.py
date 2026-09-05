@@ -220,13 +220,15 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Un job 'running' survivant d'un arrêt brutal ne reprendra jamais :
-        # au démarrage, chaque bibliothèque configurée bascule ses jobs
-        # 'running' en 'interrupted'. Sans PG (mode SQLite), rien à faire.
+        # au démarrage, une seule passe sur la passerelle non scopée (tag=None)
+        # bascule les jobs 'running' de TOUTES les bibliothèques PG en
+        # 'interrupted' — le dict libraries de chemins n'est pas consulté (en
+        # déploiement PG réel il peut être minimal/vide). Sans PG (mode
+        # SQLite), rien à faire.
         if pg_dsn is not None:
-            for configured_tag in libraries:
-                gateway = PgLibraryGateway(pg_dsn, configured_tag, markdown_cache_dir)
-                with closing(gateway):
-                    gateway.mark_interrupted_jobs()
+            gateway = PgLibraryGateway(pg_dsn, None, markdown_cache_dir)
+            with closing(gateway):
+                gateway.mark_interrupted_jobs()
         yield
 
     app = FastAPI(lifespan=lifespan)
@@ -887,13 +889,19 @@ def create_app(
                     "detail": "POST /libraries/jobs requires a PG-backed library",
                 },
             )
-        job = gateway.create_job(
-            JobRequest(
-                action=action,
-                book_ids=tuple(body.book_ids),
-                params=body.params,
+        try:
+            job = gateway.create_job(
+                JobRequest(
+                    action=action,
+                    book_ids=tuple(body.book_ids),
+                    params=body.params,
+                )
             )
-        )
+        except BaseException:
+            # run_job n'a pas pu prendre possession du gateway : on le ferme
+            # ici (sinon fuite de connexion) avant de propager l'erreur.
+            gateway.close()
+            raise
         # Le gateway n'est PAS fermé ici : run_job l'exécute après la réponse
         # et en prend possession (fermeture dans son finally).
         background_tasks.add_task(

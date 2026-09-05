@@ -1,10 +1,12 @@
 from pathlib import Path
 
 import psycopg
+import pytest
 from fastapi.testclient import TestClient
 
 import book0_api.jobs
 from book0_api.main import create_app
+from book0_core.pg_gateway import PgLibraryGateway
 from tests.conftest import GRIMOIRE_TEST_LIBRARY_UUID
 
 
@@ -357,8 +359,36 @@ def test_job_running_devient_interrupted_au_demarrage(pg_library):
             )
         conn.commit()
 
-    app = create_app({"grimoire-test": Path(".")}, pg_dsn=pg_library)
+    # App démarrée avec un dict de config vide : en mode PG la récupération ne
+    # doit PAS dépendre du dict libraries (déploiement PG réel, dict minimal).
+    app = create_app({}, pg_dsn=pg_library)
     with TestClient(app):
         detail = TestClient(app).get(f"/libraries/jobs/{job_id}").json()
     assert detail["status"] == "interrupted"
     assert detail["finished_at"] is not None
+
+
+def test_post_job_echec_create_job_ferme_le_gateway(pg_library, monkeypatch):
+    # Si create_job lève après l'ouverture de la connexion, la route ferme le
+    # gateway (sinon fuite de connexion) avant de propager l'erreur.
+    closed: list[bool] = []
+    original_close = PgLibraryGateway.close
+
+    def failing_create_job(self: PgLibraryGateway, request: object) -> object:
+        raise RuntimeError("boom create_job")
+
+    def tracking_close(self: PgLibraryGateway) -> None:
+        closed.append(True)
+        original_close(self)
+
+    monkeypatch.setattr(PgLibraryGateway, "create_job", failing_create_job)
+    monkeypatch.setattr(PgLibraryGateway, "close", tracking_close)
+
+    app = create_app({}, default_tag="grimoire-test", pg_dsn=pg_library)
+    client = TestClient(app)
+    with pytest.raises(RuntimeError):
+        client.post(
+            "/libraries/jobs",
+            json={"action": "convert-markdown", "book_ids": ["1"]},
+        )
+    assert closed == [True]
