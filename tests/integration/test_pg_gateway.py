@@ -1,8 +1,11 @@
 import hashlib
 import os
+import uuid
+from datetime import datetime
 
 import psycopg
 import pytest
+from psycopg.types.json import Json
 
 from book0_core.errors import (
     BookNotFoundError,
@@ -19,6 +22,11 @@ from book0_core.models import (
     BookQuery,
     BookSort,
     EditBooksResult,
+    JobAction,
+    JobFailure,
+    JobOutcome,
+    JobRequest,
+    JobStatus,
     Publisher,
     Series,
     SortOrder,
@@ -770,4 +778,175 @@ def test_pg_get_book_content_extract_absent_du_document(pg_library):
 
     with pytest.raises(InvalidExtractError):
         gw.get_book_content("1", 7, "9...9")
+    gw.close()
+
+
+# --- Jobs : persistance PG (spec §7.2) ---
+# create_job insère en 'pending' ; get_job est scopé par library_uuid ;
+# list_jobs_page trie created_at DESC avec filtres status/action optionnels ;
+# mark_interrupted_jobs bascule les 'running' en 'interrupted' (crash/restart).
+
+
+def test_pg_create_job_persiste_en_pending(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    job = gw.create_job(
+        JobRequest(
+            action=JobAction.CONVERT_MARKDOWN, book_ids=("1",), params={"level": 5}
+        )
+    )
+
+    assert job.status is JobStatus.PENDING
+    assert job.id
+    assert job.outcome is None
+    assert job.started_at is None and job.finished_at is None
+    fetched = gw.get_job(job.id)
+    assert fetched is not None
+    assert fetched.action is JobAction.CONVERT_MARKDOWN
+    assert fetched.status is JobStatus.PENDING
+    # created_at : ISO 8601 UTC, suffixe 'Z' (format wire de la spec §7.2).
+    assert fetched.created_at.endswith("Z")
+    datetime.fromisoformat(fetched.created_at)
+    # params sérialisés en jsonb tels quels.
+    row = _pg_fetchone(
+        pg_library, "SELECT params FROM jobs WHERE id = %s", (uuid.UUID(job.id),)
+    )
+    assert row == ({"level": 5},)
+    gw.close()
+
+
+def test_pg_create_job_params_absents_deviennent_un_objet_vide(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    job = gw.create_job(JobRequest(action=JobAction.SYNC_LIBRARY))
+
+    row = _pg_fetchone(
+        pg_library, "SELECT params FROM jobs WHERE id = %s", (uuid.UUID(job.id),)
+    )
+    assert row == ({},)
+    gw.close()
+
+
+def test_pg_get_job_inconnu_renvoie_none(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    assert gw.get_job("8f3a9c00-0000-0000-0000-000000000000") is None
+    gw.close()
+
+
+def test_pg_get_job_deserialise_l_outcome(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    job = gw.create_job(JobRequest(action=JobAction.CONVERT_MARKDOWN))
+
+    with gw._connection.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='done', started_at=now(), finished_at=now(),"
+            " outcome=%s WHERE id=%s",
+            (
+                Json(
+                    {
+                        "succeeded": ["1"],
+                        "failed": [{"id": "2", "reason": "NoEpubError"}],
+                    }
+                ),
+                uuid.UUID(job.id),
+            ),
+        )
+    fetched = gw.get_job(job.id)
+
+    assert fetched is not None
+    assert fetched.status is JobStatus.DONE
+    assert fetched.outcome == JobOutcome(
+        succeeded=("1",),
+        failed=(JobFailure(id="2", reason="NoEpubError"),),
+    )
+    assert fetched.started_at is not None and fetched.finished_at is not None
+    assert fetched.started_at.endswith("Z") and fetched.finished_at.endswith("Z")
+    gw.close()
+
+
+def test_pg_list_jobs_filtre_statut_et_action(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.create_job(JobRequest(action=JobAction.CONVERT_MARKDOWN))
+    gw.create_job(JobRequest(action=JobAction.SYNC_LIBRARY))
+
+    page = gw.list_jobs_page(
+        status=None, action=JobAction.SYNC_LIBRARY, page=1, page_size=10
+    )
+
+    assert len(page.items) == 1
+    assert page.items[0].action is JobAction.SYNC_LIBRARY
+    gw.close()
+
+
+def test_pg_list_jobs_filtre_statut(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    done_job = gw.create_job(JobRequest(action=JobAction.CONVERT_MARKDOWN))
+    gw.create_job(JobRequest(action=JobAction.CONVERT_MARKDOWN))
+    with gw._connection.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='done', outcome=%s WHERE id=%s",
+            (Json({"succeeded": [], "failed": []}), uuid.UUID(done_job.id)),
+        )
+
+    page = gw.list_jobs_page(status=JobStatus.DONE, action=None, page=1, page_size=10)
+
+    assert len(page.items) == 1
+    assert page.items[0].id == done_job.id
+    assert page.items[0].status is JobStatus.DONE
+    gw.close()
+
+
+def test_pg_list_jobs_tri_created_at_desc_et_pagination(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    created = [
+        gw.create_job(JobRequest(action=JobAction.CONVERT_MARKDOWN)) for _ in range(3)
+    ]
+
+    page = gw.list_jobs_page(status=None, action=None, page=1, page_size=2)
+
+    # Les plus récents d'abord (chaque create_job est sa propre transaction,
+    # donc created_at est strictement croissant).
+    assert [j.id for j in page.items] == [created[2].id, created[1].id]
+    assert page.handle is None  # jobs : pagination offset simple, pas de handle
+    assert page.total_pages == 2
+    assert page.has_more_than_shown is False
+
+    page2 = gw.list_jobs_page(status=None, action=None, page=2, page_size=2)
+
+    assert [j.id for j in page2.items] == [created[0].id]
+    gw.close()
+
+
+def test_pg_list_jobs_page_vide(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    page = gw.list_jobs_page(status=None, action=None, page=1, page_size=10)
+
+    assert page.items == ()
+    assert page.total_pages == 0
+    gw.close()
+
+
+def test_pg_mark_interrupted_jobs(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    job = gw.create_job(JobRequest(action=JobAction.CONVERT_MARKDOWN))
+    pending = gw.create_job(JobRequest(action=JobAction.SYNC_LIBRARY))
+
+    with gw._connection.cursor() as cur:  # simule un crash en pleine exécution
+        cur.execute(
+            "UPDATE jobs SET status='running', started_at=now() WHERE id=%s",
+            (uuid.UUID(job.id),),
+        )
+
+    assert gw.mark_interrupted_jobs() == 1
+    fetched = gw.get_job(job.id)
+    assert fetched is not None
+    assert fetched.status is JobStatus.INTERRUPTED
+    assert fetched.finished_at is not None
+    # Un job non running n'est pas touché.
+    untouched = gw.get_job(pending.id)
+    assert untouched is not None and untouched.status is JobStatus.PENDING
+    # Rappel au démarrage sans running restant : plus rien à marquer.
+    assert gw.mark_interrupted_jobs() == 0
     gw.close()

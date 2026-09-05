@@ -12,12 +12,13 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal, cast
 
 import psycopg
 from epub2md import build_markdown, parse_extract_spec
+from psycopg.types.json import Json
 
 from book0_core.errors import (
     BookNotFoundError,
@@ -37,8 +38,15 @@ from book0_core.models import (
     BookSort,
     EditBooksResult,
     FieldValue,
+    Job,
+    JobAction,
+    JobFailure,
+    JobOutcome,
+    JobRequest,
+    JobStatus,
     PagedAuthorsResult,
     PagedBooksResult,
+    PagedJobsResult,
     PagedPublishersResult,
     PagedSeriesResult,
     Publisher,
@@ -214,6 +222,37 @@ _FACET_QUERIES: dict[str, str] = {
         " ORDER BY count(*) DESC, (ratings.rating / 2)::text"
     ),
 }
+
+# Jobs de fond (spec §7.2) : le layout de cette requête est consommé par
+# _job_from_row (id, action, status, outcome, created_at, started_at,
+# finished_at) ; le WHERE et le ORDER BY sont ajoutés par appelant.
+_JOBS_QUERY = (
+    "SELECT id, action, status, outcome, created_at, started_at, finished_at FROM jobs"
+)
+
+
+def _iso_utc(value: datetime) -> str:
+    """Formate un timestamptz PG en ISO 8601 UTC suffixé 'Z' - le format wire
+    des timestamps de jobs dans la spec §7.2 (ex. 2026-08-31T12:00:00Z)."""
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _job_outcome_from_json(value: object) -> JobOutcome | None:
+    """Désérialise l'outcome jsonb d'un job en JobOutcome (None si NULL) ;
+    les dicts viennent du décodeur jsonb natif de psycopg."""
+    if value is None:
+        return None
+    data = cast("dict[str, object]", value)
+    return JobOutcome(
+        succeeded=tuple(
+            str(book_id)
+            for book_id in cast("list[object]", data.get("succeeded") or ())
+        ),
+        failed=tuple(
+            JobFailure(id=str(item["id"]), reason=str(item["reason"]))
+            for item in cast("list[dict[str, object]]", data.get("failed") or ())
+        ),
+    )
 
 
 def _extract_syntax_error_type() -> type[Exception]:
@@ -989,6 +1028,111 @@ class PgLibraryGateway:
             (self._library_uuid, next_local_id, value),
         )
         return int(cast("tuple[int, ...]", cursor.fetchone())[0])
+
+    def create_job(self, request: JobRequest) -> Job:
+        """Persiste un job en 'pending' et le retourne. params est sérialisé
+        en jsonb tel quel ({} quand la requête n'en porte pas)."""
+        job_id = uuid.uuid4()
+        params = dict(request.params) if request.params else {}
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO jobs (id, library_uuid, action, status, params)"
+                " VALUES (%s, %s, %s, 'pending', %s)"
+                " RETURNING created_at",
+                (job_id, self._library_uuid, request.action.value, Json(params)),
+            )
+            created_at = _iso_utc(
+                cast("datetime", cast("tuple[object, ...]", cursor.fetchone())[0])
+            )
+        return Job(
+            id=str(job_id),
+            action=request.action,
+            status=JobStatus.PENDING,
+            created_at=created_at,
+            started_at=None,
+            finished_at=None,
+            outcome=None,
+        )
+
+    def get_job(self, job_id: str) -> Job | None:
+        """Retourne le job demandé de la bibliothèque, None s'il est inconnu
+        (ou si job_id n'est pas un UUID - même sémantique « pas trouvé »)."""
+        try:
+            job_uuid = uuid.UUID(job_id)
+        except ValueError:
+            return None
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _JOBS_QUERY + " WHERE library_uuid = %s AND id = %s",
+                (self._library_uuid, job_uuid),
+            )
+            row = cursor.fetchone()
+        return self._job_from_row(row) if row is not None else None
+
+    def list_jobs_page(
+        self,
+        status: JobStatus | None,
+        action: JobAction | None,
+        page: int,
+        page_size: int,
+    ) -> PagedJobsResult:
+        """Liste paginée des jobs de la bibliothèque, triée created_at DESC
+        (id DESC en brise-dégalité), filtres status/action optionnels.
+        Pagination offset SQL simple : le handle est toujours None."""
+        params: list[object] = [self._library_uuid]
+        where = " WHERE library_uuid = %s"
+        if status is not None:
+            where += " AND status = %s"
+            params.append(status.value)
+        if action is not None:
+            where += " AND action = %s"
+            params.append(action.value)
+        rows = self._fetch_all(
+            _JOBS_QUERY + where + " ORDER BY created_at DESC, id DESC"
+            " LIMIT %s OFFSET %s",
+            (*params, page_size, (page - 1) * page_size),
+        )
+        total_pages, has_more = self._bounded_total_pages(
+            "SELECT id FROM jobs" + where, page_size, tuple(params)
+        )
+        return PagedJobsResult(
+            items=tuple(self._job_from_row(row) for row in rows),
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_more_than_shown=has_more,
+            handle=None,
+        )
+
+    def mark_interrupted_jobs(self) -> int:
+        """Bascule les jobs 'running' de la bibliothèque en 'interrupted'
+        (un job running sans processus vivant l'est forcément après un
+        redémarrage) ; retourne le nombre de lignes mises à jour."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE jobs SET status = 'interrupted', finished_at = now()"
+                " WHERE status = 'running' AND library_uuid = %s",
+                (self._library_uuid,),
+            )
+            return cursor.rowcount
+
+    @staticmethod
+    def _job_from_row(row: tuple[object, ...]) -> Job:
+        """Layout (voir _JOBS_QUERY) : id, action, status, outcome, created_at,
+        started_at, finished_at."""
+        return Job(
+            id=str(row[0]),
+            action=JobAction(str(row[1])),
+            status=JobStatus(str(row[2])),
+            outcome=_job_outcome_from_json(row[3]),
+            created_at=_iso_utc(cast("datetime", row[4])),
+            started_at=_iso_utc(cast("datetime", row[5]))
+            if row[5] is not None
+            else None,
+            finished_at=(
+                _iso_utc(cast("datetime", row[6])) if row[6] is not None else None
+            ),
+        )
 
     def _query_entity_page(
         self,
