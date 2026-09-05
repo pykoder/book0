@@ -8,9 +8,11 @@ import pytest
 from psycopg.types.json import Json
 
 from book0_core.errors import (
+    AuthorNameMismatchError,
     AuthorNotFoundError,
     BookNotFoundError,
     InvalidAliasError,
+    InvalidApplyNameError,
     InvalidExtractError,
     InvalidPatchError,
     LibraryNotFoundError,
@@ -18,6 +20,8 @@ from book0_core.errors import (
 )
 from book0_core.gateway import ReadLibraryGateway
 from book0_core.models import (
+    ApplyNameRequest,
+    ApplyNameResult,
     Author,
     BookContent,
     BookPatch,
@@ -29,6 +33,8 @@ from book0_core.models import (
     JobOutcome,
     JobRequest,
     JobStatus,
+    NameTargetById,
+    NameTargetByName,
     Publisher,
     Series,
     SortOrder,
@@ -1213,4 +1219,221 @@ def test_pg_remove_alias_auto_association_rejetee(pg_library):
 
     with pytest.raises(InvalidAliasError):
         gw.remove_author_alias("1", "1")
+    gw.close()
+
+
+# --- apply_author_name : correction en masse des graphies (spec §7.3) ---
+# Seed pg_library : auteur 1 = Frank Herbert (livre 1 Dune), 2 = J.R.R. Tolkien
+# (livre 2 The Hobbit), 3 = Neil Gaiman + 4 = Terry Pratchett (livre 3
+# Good Omens, deux auteurs). Le brief se fonde sur les noms "Herbert, Frank"
+# (les author_sort) ; les noms réels du seed sont "Frank Herbert", etc.
+
+
+def test_pg_apply_name_par_id_repointe_les_livres(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.add_author_alias("1", "2")
+
+    result = gw.apply_author_name(
+        "1",
+        ApplyNameRequest(match="^Frank Herbert$", target=NameTargetById(author_id="2")),
+    )
+
+    assert result == ApplyNameResult(applied=("1",), skipped=(), missing_ids=())
+    books = {
+        b.title for b in gw.query_books_page(BookQuery(author_ids=("2",)), 1, 100).items
+    }
+    assert {"Dune", "The Hobbit"} <= books
+    # l'auteur source n'a plus aucun livre
+    assert gw.query_books_page(BookQuery(author_ids=("1",)), 1, 100).items == ()
+    gw.close()
+
+
+def test_pg_apply_name_regexp_non_correspondante(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.add_author_alias("1", "2")
+
+    with pytest.raises(AuthorNameMismatchError):
+        gw.apply_author_name(
+            "1",
+            ApplyNameRequest(
+                match="^nom qui n'existe pas$",
+                target=NameTargetById(author_id="2"),
+            ),
+        )
+    gw.close()
+
+
+def test_pg_apply_name_regexp_invalide(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidApplyNameError):
+        gw.apply_author_name(
+            "1",
+            ApplyNameRequest(match="(", target=NameTargetById(author_id="2")),
+        )
+    gw.close()
+
+
+def test_pg_apply_name_cible_hors_groupe_rejetee(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidAliasError):
+        gw.apply_author_name(
+            "1", ApplyNameRequest(match=".", target=NameTargetById(author_id="2"))
+        )  # 2 pas dans le groupe (aucun groupe)
+    gw.close()
+
+
+def test_pg_apply_name_par_name_cree_la_ligne_et_groupe(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    result = gw.apply_author_name(
+        "1",
+        ApplyNameRequest(
+            match="^Frank Herbert$", target=NameTargetByName(name="F. Herbert")
+        ),
+    )
+
+    assert result.applied == ("1",)
+    details = gw.get_book_details(["1"])
+    assert "F. Herbert" in details.books[0].authors
+    # la ligne auteur a été créée et fait partie du groupe de l'auteur 1
+    group = gw.get_author_aliases("1")
+    assert "F. Herbert" in set(group.names.values())
+    gw.close()
+
+
+def test_pg_apply_name_par_name_auteur_existant_rejoint_le_groupe(pg_library):
+    # Cible par nom désignant un auteur EXISTANT hors groupe : il est admis
+    # dans le groupe et les livres sont transférés (fusion par graphie).
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    result = gw.apply_author_name(
+        "1",
+        ApplyNameRequest(
+            match="^Frank Herbert$",
+            target=NameTargetByName(name="J.R.R. Tolkien"),
+        ),
+    )
+
+    assert result.applied == ("1",)
+    assert set(gw.get_author_aliases("1").group) == {"1", "2"}
+    books = {
+        b.title for b in gw.query_books_page(BookQuery(author_ids=("2",)), 1, 100).items
+    }
+    assert "Dune" in books
+    gw.close()
+
+
+def test_pg_apply_name_dry_run_n_ecrit_rien(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.add_author_alias("1", "2")
+    avant = gw.query_books_page(BookQuery(author_ids=("1",)), 1, 100)
+
+    result = gw.apply_author_name(
+        "1",
+        ApplyNameRequest(
+            match="^Frank Herbert$",
+            target=NameTargetById(author_id="2"),
+            dry_run=True,
+        ),
+    )
+
+    assert result.applied == ("1",)  # même réponse qu'une exécution réelle
+    assert (
+        gw.query_books_page(BookQuery(author_ids=("1",)), 1, 100).items == avant.items
+    )
+    # le groupe d'alias non plus n'a pas bougé
+    assert gw.get_author_aliases("1").group == ("1", "2")
+    gw.close()
+
+
+def test_pg_apply_name_livres_non_lies_dans_skipped(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.add_author_alias("1", "2")
+
+    result = gw.apply_author_name(
+        "1",
+        ApplyNameRequest(
+            match="^Frank Herbert$",
+            target=NameTargetById(author_id="2"),
+            book_ids=("1", "3"),
+        ),
+    )  # livre 3 (Good Omens) sans l'auteur 1
+
+    assert result == ApplyNameResult(applied=("1",), skipped=("3",), missing_ids=())
+    # les autres auteurs du livre sauté ne sont jamais touchés
+    details = gw.get_book_details(["3"])
+    assert set(details.books[0].authors) == {"Neil Gaiman", "Terry Pratchett"}
+    gw.close()
+
+
+def test_pg_apply_name_ids_inconnus_dans_missing(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.add_author_alias("1", "2")
+
+    result = gw.apply_author_name(
+        "1",
+        ApplyNameRequest(
+            match="^Frank Herbert$",
+            target=NameTargetById(author_id="2"),
+            book_ids=("1", "999"),
+        ),
+    )
+
+    assert result == ApplyNameResult(applied=("1",), skipped=(), missing_ids=("999",))
+    gw.close()
+
+
+def test_pg_apply_name_recannonicalise_display_author(pg_library):
+    # Décision liée de la revue T7 : quand la cible résout vers un auteur
+    # différent du display_author_id du groupe, le groupe est re-canonisé.
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.add_author_alias("1", "2")  # display = 1 (créateur)
+    row = _pg_fetchone(
+        pg_library,
+        "SELECT a.local_id FROM author_entity ae"
+        " JOIN authors a ON a.id = ae.display_author_id",
+    )
+    assert row == (1,)
+
+    gw.apply_author_name(
+        "1",
+        ApplyNameRequest(match="^Frank Herbert$", target=NameTargetById(author_id="2")),
+    )
+
+    row = _pg_fetchone(
+        pg_library,
+        "SELECT a.local_id FROM author_entity ae"
+        " JOIN authors a ON a.id = ae.display_author_id",
+    )
+    assert row == (2,)
+    gw.close()
+
+
+def test_pg_apply_name_cible_soi_meme_leve_invalid_apply(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    # par id : cible = l'auteur lui-même
+    with pytest.raises(InvalidApplyNameError):
+        gw.apply_author_name(
+            "1", ApplyNameRequest(match=".", target=NameTargetById(author_id="1"))
+        )
+    # par name : le nom résout vers l'auteur lui-même
+    with pytest.raises(InvalidApplyNameError):
+        gw.apply_author_name(
+            "1",
+            ApplyNameRequest(match=".", target=NameTargetByName(name="Frank Herbert")),
+        )
+    gw.close()
+
+
+def test_pg_apply_name_auteur_inconnu(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(AuthorNotFoundError):
+        gw.apply_author_name(
+            "9999",
+            ApplyNameRequest(match=".", target=NameTargetByName(name="X. Y")),
+        )
     gw.close()

@@ -21,15 +21,19 @@ from epub2md import build_markdown, parse_extract_spec
 from psycopg.types.json import Json
 
 from book0_core.errors import (
+    AuthorNameMismatchError,
     AuthorNotFoundError,
     BookNotFoundError,
     InvalidAliasError,
+    InvalidApplyNameError,
     InvalidExtractError,
     InvalidPatchError,
     LibraryNotFoundError,
     NoEpubError,
 )
 from book0_core.models import (
+    ApplyNameRequest,
+    ApplyNameResult,
     Author,
     AuthorAliasGroup,
     Book,
@@ -47,6 +51,8 @@ from book0_core.models import (
     JobOutcome,
     JobRequest,
     JobStatus,
+    NameTargetById,
+    NameTargetByName,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedJobsResult,
@@ -1244,8 +1250,9 @@ class PgLibraryGateway:
     # add_author_alias crée le groupe, y fait entrer l'alias, ou fusionne les
     # deux groupes existants (membres du second migrés vers le premier, second
     # supprimé). display_author_id est posé à la création du groupe sur
-    # l'auteur créateur (author_id) et n'est plus modifié ensuite - c'est
-    # l'auteur canonique dont le nom représente le groupe.
+    # l'auteur créateur (author_id) ; apply_author_name peut le re-canoniser
+    # vers sa cible - c'est l'auteur canonique dont le nom représente le
+    # groupe.
 
     def _resolve_author(
         self, cursor: psycopg.Cursor, author_id: str
@@ -1410,6 +1417,254 @@ class PgLibraryGateway:
             if len(self._members_of_entity(cursor, entity_a)) == 1:
                 cursor.execute("DELETE FROM author_entity WHERE id = %s", (entity_a,))
             return self._alias_group_for(cursor, author_pk, author_local_id)
+
+    def apply_author_name(
+        self, author_id: str, request: ApplyNameRequest
+    ) -> ApplyNameResult:
+        """Correction en masse des graphies : les livres de author_id liés à
+        l'auteur source sont repointés vers l'identité canonique cible, en une
+        transaction. Le garde-fou regexp protège d'une re-synchronisation
+        intempestive : request.match doit correspondre au nom ACTUEL de
+        l'auteur (re.match), une regexp invalide levant InvalidApplyNameError.
+        Cible par id : elle doit appartenir au groupe d'alias de l'auteur
+        (sinon InvalidAliasError) ; cible par name : la ligne auteur est
+        créée si besoin puis ajoutée au groupe (fusion si elle appartient à
+        un autre groupe). Quand la cible re-canonise le groupe (display_author
+        différent), author_entity.display_author_id est mis à jour vers elle.
+        Les ids de livres inconnus sont signalés dans missing_ids (pas une
+        erreur), les livres existants non liés à l'auteur dans skipped ; les
+        autres auteurs de chaque livre ne sont jamais touchés. dry_run=True
+        rejoue toute la validation et les écritures puis annule la
+        transaction : la réponse est identique, sans écriture."""
+        try:
+            compiled = re.compile(request.match)
+        except re.error as exc:
+            raise InvalidApplyNameError(
+                f"regexp invalide : {request.match!r} ({exc})"
+            ) from None
+        try:
+            with (
+                self._connection.transaction(),
+                self._connection.cursor() as cursor,
+            ):
+                author_pk, _, author_name = self._resolve_author(cursor, author_id)
+                if compiled.match(author_name) is None:
+                    raise AuthorNameMismatchError(
+                        f"match {request.match!r} ne correspond pas au nom actuel"
+                        f" {author_name!r} de l'auteur {author_id}"
+                    )
+                if isinstance(request.target, NameTargetById):
+                    target_pk, _, _ = self._resolve_author(
+                        cursor, request.target.author_id
+                    )
+                elif isinstance(request.target, NameTargetByName):
+                    target_pk = self._get_or_create_author_by_name(
+                        cursor, request.target.name
+                    )
+                else:  # pragma: no cover - l'union NameTarget l'exclut
+                    raise InvalidApplyNameError(
+                        "target : fournir exactement une des formes author_id / name"
+                    )
+                if target_pk == author_pk:
+                    raise InvalidApplyNameError(
+                        f"target identique à l'auteur source : {author_id}"
+                    )
+                self._apply_target_to_group(
+                    cursor,
+                    author_pk,
+                    target_pk,
+                    target_must_be_in_group=isinstance(request.target, NameTargetById),
+                )
+                result = self._move_author_books(
+                    cursor, author_pk, target_pk, request.book_ids
+                )
+                if request.dry_run:
+                    raise _DryRunRollback
+        except _DryRunRollback:
+            pass  # dry_run : la transaction a déjà été annulée par le context manager
+        return result
+
+    def _get_or_create_author_by_name(self, cursor: psycopg.Cursor, name: str) -> int:
+        """Auteur de la bibliothèque portant exactement ce nom, créé avec le
+        prochain local_id libre sinon ; retourne l'id interne."""
+        cursor.execute(
+            "SELECT id FROM authors WHERE library_uuid = %s AND name = %s",
+            (self._require_library_uuid(), name),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            return int(row[0])
+        cursor.execute(
+            "SELECT COALESCE(MAX(local_id), 0) + 1 FROM authors"
+            " WHERE library_uuid = %s",
+            (self._require_library_uuid(),),
+        )
+        next_local_id = int(cast("tuple[int, ...]", cursor.fetchone())[0])
+        cursor.execute(
+            "INSERT INTO authors (library_uuid, local_id, name)"
+            " VALUES (%s, %s, %s) RETURNING id",
+            (self._require_library_uuid(), next_local_id, name),
+        )
+        return int(cast("tuple[int, ...]", cursor.fetchone())[0])
+
+    def _apply_target_to_group(
+        self,
+        cursor: psycopg.Cursor,
+        author_pk: int,
+        target_pk: int,
+        target_must_be_in_group: bool,
+    ) -> None:
+        """Fait entrer l'auteur cible dans le groupe de l'auteur source (dans
+        la transaction ouverte par apply_author_name) et re-canonise le groupe
+        sur elle : display_author_id devient target_pk dès qu'il diffère.
+
+        target_must_be_in_group (cible par id) : la cible doit déjà appartenir
+        au groupe de l'auteur, sinon InvalidAliasError ; cible par name : elle
+        rejoint le groupe (créé si l'auteur source en est dépourvu), avec
+        fusion des deux groupes si elle appartient déjà à un autre - mêmes
+        mécaniques que add_author_alias."""
+        entity_a = self._entity_of_author(cursor, author_pk)
+        if target_must_be_in_group:
+            if entity_a is None or target_pk not in {
+                member_pk
+                for member_pk, _, _ in self._members_of_entity(cursor, entity_a)
+            }:
+                raise InvalidAliasError(
+                    "cible hors du groupe d'alias de l'auteur source"
+                )
+        else:
+            entity_b = self._entity_of_author(cursor, target_pk)
+            if entity_a is None and entity_b is None:
+                # Ni l'auteur ni la cible n'ont de groupe : création d'un
+                # groupe canonisé d'emblée sur la cible.
+                entity_a = uuid.uuid4()
+                cursor.execute(
+                    "INSERT INTO author_entity (id, library_uuid,"
+                    " display_author_id) VALUES (%s, %s, %s)",
+                    (entity_a, self._require_library_uuid(), target_pk),
+                )
+                cursor.executemany(
+                    "INSERT INTO author_entity_member (entity_id, author_id)"
+                    " VALUES (%s, %s)",
+                    [(entity_a, author_pk), (entity_a, target_pk)],
+                )
+            elif entity_a is None:
+                # L'auteur source rejoint le groupe existant de la cible.
+                cursor.execute(
+                    "INSERT INTO author_entity_member (entity_id, author_id)"
+                    " VALUES (%s, %s)",
+                    (entity_b, author_pk),
+                )
+                entity_a = entity_b
+            elif entity_b is None:
+                # La cible rejoint le groupe existant de l'auteur source.
+                cursor.execute(
+                    "INSERT INTO author_entity_member (entity_id, author_id)"
+                    " VALUES (%s, %s)",
+                    (entity_a, target_pk),
+                )
+            elif entity_a != entity_b:
+                # Fusion : les membres du groupe de la cible migrent vers
+                # celui de l'auteur source, le second (vidé) est supprimé.
+                cursor.execute(
+                    "UPDATE author_entity_member SET entity_id = %s"
+                    " WHERE entity_id = %s",
+                    (entity_a, entity_b),
+                )
+                cursor.execute("DELETE FROM author_entity WHERE id = %s", (entity_b,))
+        if entity_a is not None:
+            cursor.execute(
+                "SELECT display_author_id FROM author_entity WHERE id = %s",
+                (entity_a,),
+            )
+            display = cast("tuple[object, ...]", cursor.fetchone())[0]
+            if display is None or int(cast("int", display)) != target_pk:
+                cursor.execute(
+                    "UPDATE author_entity SET display_author_id = %s WHERE id = %s",
+                    (target_pk, entity_a),
+                )
+
+    def _move_author_books(
+        self,
+        cursor: psycopg.Cursor,
+        source_pk: int,
+        target_pk: int,
+        book_ids: tuple[str, ...],
+    ) -> ApplyNameResult:
+        """Repointe les livres de l'auteur source vers la cible (dans la
+        transaction ouverte par apply_author_name) : suppression du lien
+        source puis insertion du lien cible (ON CONFLICT DO NOTHING) - les
+        autres auteurs de chaque livre ne sont jamais touchés. book_ids vide
+        = tous les livres de l'auteur ; ids inconnus -> missing_ids, livres
+        non liés à la source -> skipped."""
+        if book_ids:
+            deduped_ids, valid_ids = self._partition_ids(list(book_ids))
+            book_pks: dict[str, int] = {}
+            if valid_ids:
+                placeholders = ", ".join("%s" for _ in valid_ids)
+                cursor.execute(
+                    "SELECT book_pk, local_id FROM books"
+                    f" WHERE library_uuid = %s AND local_id IN ({placeholders})"
+                    " ORDER BY local_id FOR UPDATE",
+                    (self._require_library_uuid(), *(int(i) for i in valid_ids)),
+                )
+                book_pks = {str(row[1]): int(row[0]) for row in cursor.fetchall()}
+            linked: list[str] = []
+            for book_id in deduped_ids:
+                if book_id not in book_pks:
+                    continue
+                cursor.execute(
+                    "SELECT 1 FROM books_authors_link"
+                    " WHERE book_pk = %s AND author_id = %s",
+                    (book_pks[book_id], source_pk),
+                )
+                if cursor.fetchone() is not None:
+                    linked.append(book_id)
+            for book_id in linked:
+                self._relink_book(cursor, book_pks[book_id], source_pk, target_pk)
+            return ApplyNameResult(
+                applied=tuple(linked),
+                skipped=tuple(
+                    book_id
+                    for book_id in deduped_ids
+                    if book_id in book_pks and book_id not in linked
+                ),
+                missing_ids=tuple(
+                    book_id for book_id in deduped_ids if book_id not in book_pks
+                ),
+            )
+        cursor.execute(
+            "SELECT b.book_pk, b.local_id FROM books b"
+            " JOIN books_authors_link l ON l.book_pk = b.book_pk"
+            " WHERE b.library_uuid = %s AND l.author_id = %s"
+            " ORDER BY b.local_id FOR UPDATE OF b",
+            (self._require_library_uuid(), source_pk),
+        )
+        rows = cursor.fetchall()
+        for book_pk, local_id in rows:
+            self._relink_book(cursor, int(book_pk), source_pk, target_pk)
+        return ApplyNameResult(
+            applied=tuple(str(local_id) for _, local_id in rows),
+            skipped=(),
+            missing_ids=(),
+        )
+
+    def _relink_book(
+        self,
+        cursor: psycopg.Cursor,
+        book_pk: int,
+        source_pk: int,
+        target_pk: int,
+    ) -> None:
+        cursor.execute(
+            "DELETE FROM books_authors_link WHERE book_pk = %s AND author_id = %s",
+            (book_pk, source_pk),
+        )
+        cursor.execute(
+            "INSERT INTO books_authors_link (book_pk, author_id)"
+            " VALUES (%s, %s) ON CONFLICT (book_pk, author_id) DO NOTHING",
+            (book_pk, target_pk),
+        )
 
     def _query_entity_page(
         self,

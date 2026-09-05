@@ -466,3 +466,138 @@ def test_api_pg_aliases_sqlite_mode_501(calibre_metadata_db: Path):
     assert get_response.status_code == 501
     assert get_response.json()["error"] == "NotImplementedError"
     assert post_response.status_code == 501
+
+
+# --- POST /libraries/authors/{id}/apply-name : correction en masse ---
+
+
+def test_api_pg_apply_name_par_id(pg_library):
+    app = create_app({}, default_tag="grimoire-test", pg_dsn=pg_library)
+    client = TestClient(app)
+    client.post("/libraries/authors/1/aliases", json={"alias_id": "2"})
+
+    response = client.post(
+        "/libraries/authors/1/apply-name",
+        json={"match": "^Frank Herbert$", "target": {"author_id": "2"}},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"applied": ["1"], "skipped": [], "missing_ids": []}
+    books = {
+        book["title"]
+        for book in client.get("/libraries/books", params={"author_id": "2"}).json()
+    }
+    assert "Dune" in books
+
+
+def test_api_pg_apply_name_par_name(pg_library):
+    app = create_app({}, default_tag="grimoire-test", pg_dsn=pg_library)
+    client = TestClient(app)
+
+    response = client.post(
+        "/libraries/authors/1/apply-name",
+        json={"match": "^Frank Herbert$", "target": {"name": "F. Herbert"}},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"applied": ["1"], "skipped": [], "missing_ids": []}
+    detail = client.post("/libraries/books/detail", json={"ids": ["1"]}).json()
+    assert "F. Herbert" in detail["books"][0]["authors"]
+
+
+def test_api_pg_apply_name_dry_run(pg_library):
+    app = create_app({}, default_tag="grimoire-test", pg_dsn=pg_library)
+    client = TestClient(app)
+    client.post("/libraries/authors/1/aliases", json={"alias_id": "2"})
+
+    response = client.post(
+        "/libraries/authors/1/apply-name",
+        json={
+            "match": "^Frank Herbert$",
+            "target": {"author_id": "2"},
+            "dry_run": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"applied": ["1"], "skipped": [], "missing_ids": []}
+    books = {
+        book["title"]
+        for book in client.get("/libraries/books", params={"author_id": "1"}).json()
+    }
+    assert books == {"Dune"}  # aucune écriture
+
+
+def test_api_pg_apply_name_regexp_non_correspondante_422(pg_library):
+    client = TestClient(create_app({}, default_tag="grimoire-test", pg_dsn=pg_library))
+
+    response = client.post(
+        "/libraries/authors/1/apply-name",
+        json={"match": "^impossible$", "target": {"author_id": "2"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "AuthorNameMismatchError"
+
+
+def test_api_pg_apply_name_regexp_invalide_422(pg_library):
+    client = TestClient(create_app({}, default_tag="grimoire-test", pg_dsn=pg_library))
+
+    response = client.post(
+        "/libraries/authors/1/apply-name",
+        json={"match": "(", "target": {"author_id": "2"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "InvalidApplyNameError"
+
+
+def test_api_pg_apply_name_target_sans_forme_422(pg_library):
+    client = TestClient(create_app({}, default_tag="grimoire-test", pg_dsn=pg_library))
+
+    response = client.post(
+        "/libraries/authors/1/apply-name",
+        json={"match": ".", "target": {}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "InvalidApplyNameError"
+
+
+def test_api_pg_apply_name_book_ids_vide_422(pg_library):
+    client = TestClient(create_app({}, default_tag="grimoire-test", pg_dsn=pg_library))
+
+    response = client.post(
+        "/libraries/authors/1/apply-name",
+        json={"match": ".", "target": {"author_id": "2"}, "book_ids": []},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "InvalidApplyNameError"
+
+
+def test_api_pg_apply_name_auteur_inconnu_404(pg_library):
+    client = TestClient(create_app({}, default_tag="grimoire-test", pg_dsn=pg_library))
+
+    response = client.post(
+        "/libraries/authors/9999/apply-name",
+        json={"match": ".", "target": {"author_id": "2"}},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "AuthorNotFoundError"
+
+
+def test_api_pg_apply_name_sqlite_mode_501(calibre_metadata_db: Path):
+    app = create_app(
+        {"grimoire-test": calibre_metadata_db}, default_tag="grimoire-test"
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/libraries/authors/1/apply-name",
+        json={"match": ".", "target": {"author_id": "2"}},
+    )
+
+    assert response.status_code == 501
+    assert response.json()["error"] == "NotImplementedError"

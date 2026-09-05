@@ -1,6 +1,9 @@
 from pydantic import BaseModel
 
+from book0_core.errors import InvalidApplyNameError
 from book0_core.models import (
+    ApplyNameRequest,
+    ApplyNameResult,
     Author,
     AuthorAliasGroup,
     Book,
@@ -12,6 +15,9 @@ from book0_core.models import (
     FieldValue,
     Job,
     JobOutcome,
+    NameTarget,
+    NameTargetById,
+    NameTargetByName,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedJobsResult,
@@ -375,3 +381,62 @@ class AuthorAliasGroupOut(BaseModel):
     @classmethod
     def from_group(cls, group: AuthorAliasGroup) -> "AuthorAliasGroupOut":
         return cls(group=list(group.group), names=dict(group.names))
+
+
+class NameTargetIn(BaseModel):
+    """target de POST /libraries/authors/{id}/apply-name : exactement une des
+    deux formes author_id / name (les deux, ou aucune, lèvent
+    InvalidApplyNameError à la conversion)."""
+
+    author_id: str | None = None
+    name: str | None = None
+
+
+class ApplyNameIn(BaseModel):
+    """Corps de POST /libraries/authors/{id}/apply-name. book_ids omis = tous
+    les livres de l'auteur ; fourni vide ([]), la conversion lève
+    InvalidApplyNameError (une liste vide explicite n'a pas de sens)."""
+
+    match: str
+    target: NameTargetIn
+    book_ids: list[str] | None = None
+    dry_run: bool = False
+
+    def to_apply_name_request(self) -> ApplyNameRequest:
+        target: NameTarget
+        if self.target.author_id is not None and self.target.name is not None:
+            raise InvalidApplyNameError(
+                "target : fournir exactement une des formes author_id / name"
+            )
+        if self.target.author_id is not None:
+            target = NameTargetById(author_id=self.target.author_id)
+        elif self.target.name is not None:
+            target = NameTargetByName(name=self.target.name)
+        else:
+            raise InvalidApplyNameError(
+                "target : fournir exactement une des formes author_id / name"
+            )
+        if self.book_ids is not None and not self.book_ids:
+            raise InvalidApplyNameError(
+                "book_ids : une liste fournie ne peut pas être vide"
+            )
+        return ApplyNameRequest(
+            match=self.match,
+            target=target,
+            book_ids=tuple(self.book_ids) if self.book_ids is not None else (),
+            dry_run=self.dry_run,
+        )
+
+
+class ApplyNameOut(BaseModel):
+    applied: list[str]
+    skipped: list[str]
+    missing_ids: list[str]
+
+    @classmethod
+    def from_result(cls, result: ApplyNameResult) -> "ApplyNameOut":
+        return cls(
+            applied=list(result.applied),
+            skipped=list(result.skipped),
+            missing_ids=list(result.missing_ids),
+        )

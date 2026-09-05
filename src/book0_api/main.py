@@ -9,6 +9,8 @@ from fastapi.responses import JSONResponse, Response
 from book0_api.filters import parse_id_list, parse_int_list, parse_text_list
 from book0_api.jobs import run_job
 from book0_api.schemas import (
+    ApplyNameIn,
+    ApplyNameOut,
     AuthorAliasGroupOut,
     AuthorAliasIn,
     AuthorOut,
@@ -30,9 +32,11 @@ from book0_api.schemas import (
     SeriesOut,
 )
 from book0_core.errors import (
+    AuthorNameMismatchError,
     AuthorNotFoundError,
     BookNotFoundError,
     InvalidAliasError,
+    InvalidApplyNameError,
     InvalidExtractError,
     InvalidFilterError,
     InvalidPatchError,
@@ -972,6 +976,68 @@ def create_app(
                 )
 
             return AuthorAliasGroupOut.from_group(group)
+
+    @app.post("/libraries/authors/{id}/apply-name", response_model=None)
+    def apply_author_name(
+        id: str, body: ApplyNameIn, tag: str | None = None
+    ) -> ApplyNameOut | JSONResponse:
+        try:
+            request = body.to_apply_name_request()
+        except InvalidApplyNameError as error:
+            return JSONResponse(
+                status_code=422,
+                content={"error": "InvalidApplyNameError", "detail": str(error)},
+            )
+
+        try:
+            gateway = _resolve_gateway(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+
+        with closing(gateway):
+            if not isinstance(gateway, PgLibraryGateway):
+                return JSONResponse(
+                    status_code=501,
+                    content={
+                        "error": "NotImplementedError",
+                        "detail": (
+                            "POST /libraries/authors/{id}/apply-name requires a"
+                            " PG-backed library"
+                        ),
+                    },
+                )
+            try:
+                result = gateway.apply_author_name(id, request)
+            except AuthorNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "AuthorNotFoundError", "detail": str(error)},
+                )
+            except AuthorNameMismatchError as error:
+                return JSONResponse(
+                    status_code=422,
+                    content={"error": "AuthorNameMismatchError", "detail": str(error)},
+                )
+            except InvalidApplyNameError as error:
+                return JSONResponse(
+                    status_code=422,
+                    content={"error": "InvalidApplyNameError", "detail": str(error)},
+                )
+            except InvalidAliasError as error:
+                return JSONResponse(
+                    status_code=422,
+                    content={"error": "InvalidAliasError", "detail": str(error)},
+                )
+
+            return ApplyNameOut.from_result(result)
 
     @app.post("/libraries/jobs", response_model=None)
     def create_job(

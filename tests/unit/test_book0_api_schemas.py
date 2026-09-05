@@ -1,4 +1,7 @@
+import pytest
+
 from book0_api.schemas import (
+    ApplyNameIn,
     AuthorOut,
     BookDetailsOut,
     BookDetailsResultOut,
@@ -11,11 +14,15 @@ from book0_api.schemas import (
     SeriesItemOut,
     SeriesOut,
 )
+from book0_core.errors import InvalidApplyNameError
 from book0_core.models import (
+    ApplyNameRequest,
     Author,
     Book,
     BookDetails,
     BookDetailsResult,
+    NameTargetById,
+    NameTargetByName,
     PagedAuthorsResult,
     PagedBooksResult,
     PagedPublishersResult,
@@ -295,3 +302,51 @@ def test_paged_series_out_from_paged_result_converts_series():
         total_pages=1,
         has_more_than_shown=False,
     )
+
+
+def test_apply_name_in_to_request_par_id():
+    body = ApplyNameIn(match="^Frank Herbert$", target={"author_id": "2"})
+
+    assert body.to_apply_name_request() == ApplyNameRequest(
+        match="^Frank Herbert$",
+        target=NameTargetById(author_id="2"),
+        book_ids=(),
+        dry_run=False,
+    )
+
+
+def test_apply_name_in_to_request_par_name():
+    body = ApplyNameIn(
+        match="^Frank Herbert$",
+        target={"name": "F. Herbert"},
+        book_ids=["1", "3"],
+        dry_run=True,
+    )
+
+    assert body.to_apply_name_request() == ApplyNameRequest(
+        match="^Frank Herbert$",
+        target=NameTargetByName(name="F. Herbert"),
+        book_ids=("1", "3"),
+        dry_run=True,
+    )
+
+
+def test_apply_name_in_target_sans_forme_leve_invalid_apply_name():
+    body = ApplyNameIn(match=".", target={})
+
+    with pytest.raises(InvalidApplyNameError):
+        body.to_apply_name_request()
+
+
+def test_apply_name_in_target_avec_deux_formes_leve_invalid_apply_name():
+    body = ApplyNameIn(match=".", target={"author_id": "2", "name": "X"})
+
+    with pytest.raises(InvalidApplyNameError):
+        body.to_apply_name_request()
+
+
+def test_apply_name_in_book_ids_fourni_vide_leve_invalid_apply_name():
+    body = ApplyNameIn(match=".", target={"author_id": "2"}, book_ids=[])
+
+    with pytest.raises(InvalidApplyNameError):
+        body.to_apply_name_request()
