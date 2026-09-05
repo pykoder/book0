@@ -2,6 +2,7 @@ import hashlib
 import os
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -48,6 +49,7 @@ from tests.conftest import (
     GRIMOIRE_TEST_LIBRARY_UUID,
     PG_DUNE_EPUB_RELATIVE,
     _expected_details_with_cover,
+    _write_minimal_epub,
 )
 
 
@@ -636,9 +638,10 @@ def _dune_epub_path(pg_library_root):
     return pg_library_root / PG_DUNE_EPUB_RELATIVE
 
 
-def _cache_filename(book_id, level, epub_mtime, extract):
+def _cache_filename(book_id, level, epub_mtime, extract, library_uuid):
+    library_hex = uuid.UUID(library_uuid).hex[:12]
     digest = hashlib.sha256((extract or "").encode()).hexdigest()[:12]
-    return f"{book_id}-{level}-{int(epub_mtime)}-{digest}.md"
+    return f"{library_hex}-{book_id}-{level}-{int(epub_mtime)}-{digest}.md"
 
 
 def test_pg_get_book_content_convertit(pg_library):
@@ -716,7 +719,9 @@ def test_pg_get_book_content_cache_reutilise(pg_library, pg_library_root, tmp_pa
 
     first = gw.get_book_content("1", 7, None)
 
-    cached = cache_dir / _cache_filename("1", 7, epub_mtime, None)
+    cached = cache_dir / _cache_filename(
+        "1", 7, epub_mtime, None, GRIMOIRE_TEST_LIBRARY_UUID
+    )
     assert cached.is_file()
     assert cached.read_text(encoding="utf-8") == first.markdown
 
@@ -753,7 +758,9 @@ def test_pg_get_book_content_cache_invalide_si_epub_change(
     second = gw.get_book_content("1", 7, None)
 
     assert second.markdown == first.markdown  # reconverti, pas l'ancien cache
-    assert (cache_dir / _cache_filename("1", 7, new_mtime, None)).is_file()
+    assert (
+        cache_dir / _cache_filename("1", 7, new_mtime, None, GRIMOIRE_TEST_LIBRARY_UUID)
+    ).is_file()
     gw.close()
 
 
@@ -769,8 +776,12 @@ def test_pg_get_book_content_cache_keys_distinctes_par_extract(
     first = gw.get_book_content("1", 7, "1...1")
     second = gw.get_book_content("1", 7, "1...2")
 
-    cache_first = cache_dir / _cache_filename("1", 7, epub_mtime, "1...1")
-    cache_second = cache_dir / _cache_filename("1", 7, epub_mtime, "1...2")
+    cache_first = cache_dir / _cache_filename(
+        "1", 7, epub_mtime, "1...1", GRIMOIRE_TEST_LIBRARY_UUID
+    )
+    cache_second = cache_dir / _cache_filename(
+        "1", 7, epub_mtime, "1...2", GRIMOIRE_TEST_LIBRARY_UUID
+    )
     assert cache_first.is_file() and cache_second.is_file()
     assert cache_first != cache_second
     assert cache_first.read_text(encoding="utf-8") == first.markdown
@@ -778,6 +789,71 @@ def test_pg_get_book_content_cache_keys_distinctes_par_extract(
     assert "Chapitre 1" in first.markdown and "Chapitre 2" not in first.markdown
     assert "Chapitre 2" in second.markdown
     gw.close()
+
+
+def test_pg_get_book_content_cache_distinct_par_bibliotheque(
+    pg_library, pg_library_root, tmp_path
+):
+    # Deux bibliothèques partageant le même répertoire de cache markdown, avec
+    # un livre de même local_id et un EPUB de même mtime : deux fichiers de
+    # cache distincts, chacune servant son propre markdown (jamais celui de
+    # l'autre bibliothèque).
+    cache_dir = tmp_path / "mdcache"
+    gw1 = PgLibraryGateway(pg_library, "grimoire-test", markdown_cache_dir=cache_dir)
+    epub1_mtime = int(_dune_epub_path(pg_library_root).stat().st_mtime)
+
+    # Seconde bibliothèque seedée en SQL direct : local_id 1 identique, EPUB
+    # avec exactement le même mtime, racine disque à elle.
+    other_uuid = "9c4e7f21-0000-4000-8000-00000000ffff"
+    other_root = tmp_path / "autre-lib"
+    other_rel = Path("A. Auteur") / "Autre (1)"
+    _write_minimal_epub(other_root / other_rel / "Autre.epub")
+    other_epub = other_root / other_rel / "Autre.epub"
+    os.utime(other_epub, (epub1_mtime, epub1_mtime))
+    with psycopg.connect(pg_library) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO libraries (library_uuid, name, base_path)"
+                " VALUES (%s, %s, %s)",
+                (other_uuid, "autre-lib", str(other_root)),
+            )
+            cur.execute(
+                "INSERT INTO books (library_uuid, local_id, uuid, title, title_sort,"
+                " author_sort, pubdate, timestamp, last_modified, series_index, path,"
+                " flags, has_cover)"
+                " VALUES (%s, 1, 'uuid-autre-1', 'Autre', 'Autre', 'Auteur, A.',"
+                " NULL, now(), now(), NULL, %s, 1, false) RETURNING book_pk",
+                (other_uuid, "A. Auteur/Autre (1)/"),
+            )
+            other_book_pk = int(cur.fetchone()[0])
+            cur.execute(
+                "INSERT INTO data (book_pk, format, name, uncompressed_size)"
+                " VALUES (%s, %s, %s, %s)",
+                (other_book_pk, "EPUB", "Autre", 671088),
+            )
+        conn.commit()
+
+    gw2 = PgLibraryGateway(pg_library, "autre-lib", markdown_cache_dir=cache_dir)
+
+    gw1.get_book_content("1", 7, None)
+    cache1 = cache_dir / _cache_filename(
+        "1", 7, epub1_mtime, None, GRIMOIRE_TEST_LIBRARY_UUID
+    )
+    assert cache1.is_file()
+    cache1.write_text("SENTINELLE-LIB1", encoding="utf-8")
+
+    second = gw2.get_book_content("1", 7, None)
+
+    cache2 = cache_dir / _cache_filename("1", 7, epub1_mtime, None, other_uuid)
+    assert cache1 != cache2
+    assert cache2.is_file()
+    assert second.markdown != "SENTINELLE-LIB1"  # jamais le cache de l'autre lib
+    assert "Livre Test" in second.markdown
+    # Re-lecture : chaque gateway reste servie par son propre fichier.
+    assert gw1.get_book_content("1", 7, None).markdown == "SENTINELLE-LIB1"
+    assert gw2.get_book_content("1", 7, None).markdown == second.markdown
+    gw1.close()
+    gw2.close()
 
 
 def test_pg_get_book_content_extract_absent_du_document(pg_library):

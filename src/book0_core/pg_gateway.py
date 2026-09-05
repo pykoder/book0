@@ -777,11 +777,13 @@ class PgLibraryGateway:
         self, book_id: str, level: int, extract: str | None
     ) -> BookContent:
         """Convertis l'EPUB d'un livre en markdown via epub2md, avec cache
-        disque clé par (book_id, level, mtime de l'EPUB, hash court de
-        l'extract) : le cache est invalidé dès que l'EPUB change sur disque et
-        deux extracts distincts ne partagent jamais une entrée.
+        disque clé par (bibliothèque, book_id, level, mtime de l'EPUB, hash
+        court de l'extract) : le cache est invalidé dès que l'EPUB change sur
+        disque, deux extracts distincts ne partagent jamais une entrée, et deux
+        bibliothèques partageant un même répertoire de cache non plus.
         markdown_cache_dir=None (constructeur) désactive le cache - conversion
         à chaque appel."""
+        library_uuid = self._require_library_uuid()
         if not _LEVEL_MIN <= level <= _LEVEL_MAX:
             raise InvalidExtractError(f"level hors {_LEVEL_MIN}-{_LEVEL_MAX} : {level}")
         if not _VALID_ID_PATTERN.fullmatch(book_id):
@@ -790,7 +792,7 @@ class PgLibraryGateway:
             cursor.execute(
                 "SELECT book_pk, path FROM books"
                 " WHERE library_uuid = %s AND local_id = %s",
-                (self._library_uuid, int(book_id)),
+                (library_uuid, int(book_id)),
             )
             row = cursor.fetchone()
             if row is None:
@@ -817,11 +819,15 @@ class PgLibraryGateway:
 
         cache_path: Path | None = None
         if self._markdown_cache_dir is not None:
-            # La clé intègre un hash court de l'extract demandé : deux extracts
-            # distincts au même level/mtime ne doivent pas partager un fichier.
+            # La clé intègre un hash court de l'extract demandé (deux extracts
+            # distincts au même level/mtime ne partagent pas de fichier) et un
+            # préfixe hex de la bibliothèque : deux bibliothèques partageant un
+            # même répertoire de cache ne se servent pas l'une l'autre.
+            library_hex = library_uuid.hex[:12]
             extract_digest = hashlib.sha256((extract or "").encode()).hexdigest()[:12]
             cache_path = self._markdown_cache_dir / (
-                f"{book_id}-{level}-{int(epub_path.stat().st_mtime)}-{extract_digest}.md"
+                f"{library_hex}-{book_id}-{level}-"
+                f"{int(epub_path.stat().st_mtime)}-{extract_digest}.md"
             )
             if cache_path.is_file():
                 return BookContent(
@@ -1105,7 +1111,12 @@ class PgLibraryGateway:
                 "INSERT INTO jobs (id, library_uuid, action, status, params)"
                 " VALUES (%s, %s, %s, 'pending', %s)"
                 " RETURNING created_at",
-                (job_id, self._library_uuid, request.action.value, Json(params)),
+                (
+                    job_id,
+                    self._require_library_uuid(),
+                    request.action.value,
+                    Json(params),
+                ),
             )
             created_at = _iso_utc(
                 cast("datetime", cast("tuple[object, ...]", cursor.fetchone())[0])
@@ -1223,7 +1234,7 @@ class PgLibraryGateway:
                     status.value,
                     status.value,
                     uuid.UUID(job_id),
-                    self._library_uuid,
+                    self._require_library_uuid(),
                 ),
             )
 
