@@ -58,3 +58,10 @@ concrete; the commit or plan that resolves an item removes its line.
   (`_extract_syntax_error_type`) to avoid the argparse dependency forbidden for `book0_core`.
   Deferred (2026-09-03): epub2md's API is frozen by the P1 plan — revisit when an epub2md
   breaking change becomes acceptable.
+
+- **Jobs : `book_ids` non persistés en base** — `JobRequest.book_ids` n'a pas de colonne
+  `jobs` (le schéma P1 n'en prévoit pas) ; Task 6 les passe en mémoire à `run_job`, donc
+  après un redémarrage on ne sait plus quels livres un job `convert-markdown` visait
+  (auditabilité). Option : injecter `book_ids` dans `params` jsonb à la création.
+  Deferred (2026-09-03) : aucun mécanisme de reprise des jobs pending n'existe — les jobs
+  sont des enregistrements d'issues, pas du travail reprisable.
