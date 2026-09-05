@@ -9,6 +9,8 @@ from fastapi.responses import JSONResponse, Response
 from book0_api.filters import parse_id_list, parse_int_list, parse_text_list
 from book0_api.jobs import run_job
 from book0_api.schemas import (
+    AuthorAliasGroupOut,
+    AuthorAliasIn,
     AuthorOut,
     BookContentOut,
     BookDetailsResultOut,
@@ -28,7 +30,9 @@ from book0_api.schemas import (
     SeriesOut,
 )
 from book0_core.errors import (
+    AuthorNotFoundError,
     BookNotFoundError,
+    InvalidAliasError,
     InvalidExtractError,
     InvalidFilterError,
     InvalidPatchError,
@@ -838,6 +842,136 @@ def create_app(
                 )
 
             return BookContentOut.from_book_content(content)
+
+    @app.get("/libraries/authors/{id}/aliases", response_model=None)
+    def get_author_aliases(
+        id: str, tag: str | None = None
+    ) -> AuthorAliasGroupOut | JSONResponse:
+        try:
+            gateway = _resolve_gateway(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+
+        with closing(gateway):
+            if not isinstance(gateway, PgLibraryGateway):
+                # Les groupes d'alias vivent dans author_entity (PG uniquement) :
+                # le mode SQLite reste en 501, même convention que
+                # PATCH /libraries/books.
+                return JSONResponse(
+                    status_code=501,
+                    content={
+                        "error": "NotImplementedError",
+                        "detail": (
+                            "GET /libraries/authors/{id}/aliases requires a"
+                            " PG-backed library"
+                        ),
+                    },
+                )
+            try:
+                group = gateway.get_author_aliases(id)
+            except AuthorNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "AuthorNotFoundError", "detail": str(error)},
+                )
+
+            return AuthorAliasGroupOut.from_group(group)
+
+    @app.post("/libraries/authors/{id}/aliases", response_model=None)
+    def add_author_alias(
+        id: str, body: AuthorAliasIn, tag: str | None = None
+    ) -> AuthorAliasGroupOut | JSONResponse:
+        try:
+            gateway = _resolve_gateway(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+
+        with closing(gateway):
+            if not isinstance(gateway, PgLibraryGateway):
+                return JSONResponse(
+                    status_code=501,
+                    content={
+                        "error": "NotImplementedError",
+                        "detail": (
+                            "POST /libraries/authors/{id}/aliases requires a"
+                            " PG-backed library"
+                        ),
+                    },
+                )
+            try:
+                group = gateway.add_author_alias(id, body.alias_id)
+            except AuthorNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "AuthorNotFoundError", "detail": str(error)},
+                )
+            except InvalidAliasError as error:
+                return JSONResponse(
+                    status_code=422,
+                    content={"error": "InvalidAliasError", "detail": str(error)},
+                )
+
+            return AuthorAliasGroupOut.from_group(group)
+
+    @app.delete("/libraries/authors/{id}/aliases/{alias_id}", response_model=None)
+    def remove_author_alias(
+        id: str, alias_id: str, tag: str | None = None
+    ) -> AuthorAliasGroupOut | JSONResponse:
+        try:
+            gateway = _resolve_gateway(tag)
+        except TagRequiredError as error:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "TagRequiredError", "detail": str(error)},
+            )
+        except LibraryNotFoundError as error:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "LibraryNotFoundError", "detail": str(error)},
+            )
+
+        with closing(gateway):
+            if not isinstance(gateway, PgLibraryGateway):
+                return JSONResponse(
+                    status_code=501,
+                    content={
+                        "error": "NotImplementedError",
+                        "detail": (
+                            "DELETE /libraries/authors/{id}/aliases/{alias_id}"
+                            " requires a PG-backed library"
+                        ),
+                    },
+                )
+            try:
+                group = gateway.remove_author_alias(id, alias_id)
+            except AuthorNotFoundError as error:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "AuthorNotFoundError", "detail": str(error)},
+                )
+            except InvalidAliasError as error:
+                return JSONResponse(
+                    status_code=422,
+                    content={"error": "InvalidAliasError", "detail": str(error)},
+                )
+
+            return AuthorAliasGroupOut.from_group(group)
 
     @app.post("/libraries/jobs", response_model=None)
     def create_job(

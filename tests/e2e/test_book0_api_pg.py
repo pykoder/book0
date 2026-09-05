@@ -392,3 +392,77 @@ def test_post_job_echec_create_job_ferme_le_gateway(pg_library, monkeypatch):
             json={"action": "convert-markdown", "book_ids": ["1"]},
         )
     assert closed == [True]
+
+
+# --- Groupes d'alias d'auteurs (routes GET/POST/DELETE .../aliases) ---
+
+
+def test_api_pg_aliases_cycle_post_get_delete(pg_library):
+    app = create_app({}, default_tag="grimoire-test", pg_dsn=pg_library)
+    client = TestClient(app)
+
+    posted = client.post("/libraries/authors/1/aliases", json={"alias_id": "2"})
+
+    assert posted.status_code == 200
+    assert set(posted.json()["group"]) == {"1", "2"}
+    assert posted.json()["names"] == {"1": "Frank Herbert", "2": "J.R.R. Tolkien"}
+
+    fetched = client.get("/libraries/authors/2/aliases")
+
+    assert fetched.status_code == 200
+    assert set(fetched.json()["group"]) == {"1", "2"}
+
+    deleted = client.delete("/libraries/authors/1/aliases/2")
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"group": ["1"], "names": {"1": "Frank Herbert"}}
+
+
+def test_api_pg_get_aliases_auteur_inconnu_404(pg_library):
+    client = TestClient(create_app({}, default_tag="grimoire-test", pg_dsn=pg_library))
+
+    response = client.get("/libraries/authors/9999/aliases")
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "AuthorNotFoundError"
+
+
+def test_api_pg_post_aliases_alias_inconnu_404(pg_library):
+    client = TestClient(create_app({}, default_tag="grimoire-test", pg_dsn=pg_library))
+
+    response = client.post("/libraries/authors/1/aliases", json={"alias_id": "9999"})
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "AuthorNotFoundError"
+
+
+def test_api_pg_post_aliases_auto_association_422(pg_library):
+    client = TestClient(create_app({}, default_tag="grimoire-test", pg_dsn=pg_library))
+
+    response = client.post("/libraries/authors/1/aliases", json={"alias_id": "1"})
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "InvalidAliasError"
+
+
+def test_api_pg_delete_alias_hors_groupe_422(pg_library):
+    client = TestClient(create_app({}, default_tag="grimoire-test", pg_dsn=pg_library))
+
+    response = client.delete("/libraries/authors/1/aliases/2")
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "InvalidAliasError"
+
+
+def test_api_pg_aliases_sqlite_mode_501(calibre_metadata_db: Path):
+    app = create_app(
+        {"grimoire-test": calibre_metadata_db}, default_tag="grimoire-test"
+    )
+    client = TestClient(app)
+
+    get_response = client.get("/libraries/authors/1/aliases")
+    post_response = client.post("/libraries/authors/1/aliases", json={"alias_id": "2"})
+
+    assert get_response.status_code == 501
+    assert get_response.json()["error"] == "NotImplementedError"
+    assert post_response.status_code == 501

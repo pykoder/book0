@@ -21,7 +21,9 @@ from epub2md import build_markdown, parse_extract_spec
 from psycopg.types.json import Json
 
 from book0_core.errors import (
+    AuthorNotFoundError,
     BookNotFoundError,
+    InvalidAliasError,
     InvalidExtractError,
     InvalidPatchError,
     LibraryNotFoundError,
@@ -29,6 +31,7 @@ from book0_core.errors import (
 )
 from book0_core.models import (
     Author,
+    AuthorAliasGroup,
     Book,
     BookContent,
     BookDetails,
@@ -1235,6 +1238,178 @@ class PgLibraryGateway:
                 _iso_utc(cast("datetime", row[6])) if row[6] is not None else None
             ),
         )
+
+    # --- Groupes d'alias d'auteurs (author_entity / author_entity_member) ---
+    # Un auteur ne peut être membre que d'UN groupe (UNIQUE(author_id)) :
+    # add_author_alias crée le groupe, y fait entrer l'alias, ou fusionne les
+    # deux groupes existants (membres du second migrés vers le premier, second
+    # supprimé). display_author_id est posé à la création du groupe sur
+    # l'auteur créateur (author_id) et n'est plus modifié ensuite - c'est
+    # l'auteur canonique dont le nom représente le groupe.
+
+    def _resolve_author(
+        self, cursor: psycopg.Cursor, author_id: str
+    ) -> tuple[int, str, str]:
+        """Résout un id public d'auteur en (id interne BIGINT, local_id, nom),
+        en levant AuthorNotFoundError si l'auteur n'existe pas dans la
+        bibliothèque (un id non numérique ne peut qu'être inconnu)."""
+        if not _VALID_ID_PATTERN.fullmatch(author_id):
+            raise AuthorNotFoundError(f"Author not found: local_id={author_id}")
+        cursor.execute(
+            "SELECT id, name FROM authors WHERE library_uuid = %s AND local_id = %s",
+            (self._require_library_uuid(), int(author_id)),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise AuthorNotFoundError(f"Author not found: local_id={author_id}")
+        return int(row[0]), str(int(author_id)), str(row[1])
+
+    def _entity_of_author(
+        self, cursor: psycopg.Cursor, author_pk: int
+    ) -> uuid.UUID | None:
+        """Groupe (author_entity.id) auquel appartient l'auteur, None s'il
+        n'appartient à aucun."""
+        cursor.execute(
+            "SELECT ae.id FROM author_entity ae"
+            " JOIN author_entity_member m ON m.entity_id = ae.id"
+            " WHERE ae.library_uuid = %s AND m.author_id = %s",
+            (self._require_library_uuid(), author_pk),
+        )
+        row = cursor.fetchone()
+        return uuid.UUID(str(row[0])) if row is not None else None
+
+    def _members_of_entity(
+        self, cursor: psycopg.Cursor, entity_id: uuid.UUID
+    ) -> list[tuple[int, str, str]]:
+        """Membres d'un groupe, triés par local_id : (id interne, local_id, nom)."""
+        cursor.execute(
+            "SELECT m.author_id, a.local_id, a.name FROM author_entity_member m"
+            " JOIN authors a ON a.id = m.author_id"
+            " WHERE m.entity_id = %s ORDER BY a.local_id",
+            (entity_id,),
+        )
+        return [(int(row[0]), str(row[1]), str(row[2])) for row in cursor.fetchall()]
+
+    def _alias_group_for(
+        self, cursor: psycopg.Cursor, author_pk: int, author_local_id: str
+    ) -> AuthorAliasGroup:
+        """AuthorAliasGroup de l'auteur : son groupe réel, ou le singleton
+        (lui-même) s'il n'appartient à aucun groupe."""
+        entity_id = self._entity_of_author(cursor, author_pk)
+        if entity_id is None:
+            row = (
+                author_pk,
+                author_local_id,
+                self._author_name(cursor, author_pk),
+            )
+            members = [row]
+        else:
+            members = self._members_of_entity(cursor, entity_id)
+        return AuthorAliasGroup(
+            author_id=author_local_id,
+            group=tuple(local_id for _, local_id, _ in members),
+            names={local_id: name for _, local_id, name in members},
+        )
+
+    def _author_name(self, cursor: psycopg.Cursor, author_pk: int) -> str:
+        cursor.execute("SELECT name FROM authors WHERE id = %s", (author_pk,))
+        return str(cast("tuple[object, ...]", cursor.fetchone())[0])
+
+    def get_author_aliases(self, author_id: str) -> AuthorAliasGroup:
+        """Groupe d'alias de l'auteur : auteur inconnu -> AuthorNotFoundError ;
+        sans groupe -> le singleton (author_id,) avec son nom."""
+        with self._connection.cursor() as cursor:
+            author_pk, author_local_id, _ = self._resolve_author(cursor, author_id)
+            return self._alias_group_for(cursor, author_pk, author_local_id)
+
+    def add_author_alias(self, author_id: str, alias_id: str) -> AuthorAliasGroup:
+        """Ajoute alias_id au groupe de author_id (créé si besoin) ; si l'alias
+        appartient déjà à un AUTRE groupe, les deux groupes fusionnent en une
+        transaction (les membres du second migrent vers le premier, le second
+        est supprimé). author_id == alias_id -> InvalidAliasError ; auteur
+        inconnu -> AuthorNotFoundError. Retourne le groupe résultant."""
+        with (
+            self._connection.transaction(),
+            self._connection.cursor() as cursor,
+        ):
+            author_pk, author_local_id, _ = self._resolve_author(cursor, author_id)
+            alias_pk, _, _ = self._resolve_author(cursor, alias_id)
+            if author_pk == alias_pk:
+                raise InvalidAliasError(
+                    f"un auteur ne peut pas être son propre alias : {author_id}"
+                )
+            entity_a = self._entity_of_author(cursor, author_pk)
+            entity_b = self._entity_of_author(cursor, alias_pk)
+            if entity_a is None and entity_b is None:
+                # Ni l'auteur ni l'alias n'ont de groupe : création d'un
+                # groupe dont display_author_id est l'auteur créateur.
+                new_entity_id = uuid.uuid4()
+                cursor.execute(
+                    "INSERT INTO author_entity (id, library_uuid,"
+                    " display_author_id) VALUES (%s, %s, %s)",
+                    (new_entity_id, self._require_library_uuid(), author_pk),
+                )
+                cursor.executemany(
+                    "INSERT INTO author_entity_member (entity_id, author_id)"
+                    " VALUES (%s, %s)",
+                    [(new_entity_id, author_pk), (new_entity_id, alias_pk)],
+                )
+            elif entity_a is None:
+                # L'auteur rejoint le groupe existant de l'alias.
+                cursor.execute(
+                    "INSERT INTO author_entity_member (entity_id, author_id)"
+                    " VALUES (%s, %s)",
+                    (entity_b, author_pk),
+                )
+            elif entity_b is None:
+                # L'alias rejoint le groupe existant de l'auteur.
+                cursor.execute(
+                    "INSERT INTO author_entity_member (entity_id, author_id)"
+                    " VALUES (%s, %s)",
+                    (entity_a, alias_pk),
+                )
+            elif entity_a != entity_b:
+                # Fusion : les membres du second groupe migrent vers le
+                # premier (disjoints par UNIQUE(author_id)), puis le
+                # second (vidé) est supprimé - l'ON DELETE CASCADE
+                # n'a plus aucune ligne de membre à retirer.
+                cursor.execute(
+                    "UPDATE author_entity_member SET entity_id = %s"
+                    " WHERE entity_id = %s",
+                    (entity_a, entity_b),
+                )
+                cursor.execute("DELETE FROM author_entity WHERE id = %s", (entity_b,))
+            return self._alias_group_for(cursor, author_pk, author_local_id)
+
+    def remove_author_alias(self, author_id: str, alias_id: str) -> AuthorAliasGroup:
+        """Retire alias_id du groupe de author_id (l'auteur reste en base) ;
+        si le groupe devient mono-membre, la ligne author_entity est supprimée.
+        alias hors groupe (ou auto-association) -> InvalidAliasError ; auteur
+        inconnu -> AuthorNotFoundError. Retourne le groupe résultant."""
+        with (
+            self._connection.transaction(),
+            self._connection.cursor() as cursor,
+        ):
+            author_pk, author_local_id, _ = self._resolve_author(cursor, author_id)
+            alias_pk, _, _ = self._resolve_author(cursor, alias_id)
+            if author_pk == alias_pk:
+                raise InvalidAliasError(
+                    f"un auteur ne peut pas être son propre alias : {author_id}"
+                )
+            entity_a = self._entity_of_author(cursor, author_pk)
+            entity_b = self._entity_of_author(cursor, alias_pk)
+            if entity_a is None or entity_a != entity_b:
+                raise InvalidAliasError(
+                    f"alias {alias_id} hors du groupe de {author_id}"
+                )
+            cursor.execute(
+                "DELETE FROM author_entity_member"
+                " WHERE entity_id = %s AND author_id = %s",
+                (entity_a, alias_pk),
+            )
+            if len(self._members_of_entity(cursor, entity_a)) == 1:
+                cursor.execute("DELETE FROM author_entity WHERE id = %s", (entity_a,))
+            return self._alias_group_for(cursor, author_pk, author_local_id)
 
     def _query_entity_page(
         self,

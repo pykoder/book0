@@ -8,7 +8,9 @@ import pytest
 from psycopg.types.json import Json
 
 from book0_core.errors import (
+    AuthorNotFoundError,
     BookNotFoundError,
+    InvalidAliasError,
     InvalidExtractError,
     InvalidPatchError,
     LibraryNotFoundError,
@@ -1068,3 +1070,147 @@ def test_pg_lectures_de_jobs_globales_sans_tag(pg_library):
     all_ids = {j.id for j in unscoped.list_jobs_page(None, None, 1, 10).items}
     assert all_ids == {job_scoped.id, str(other_job_id)}
     unscoped.close()
+
+
+# --- Groupes d'alias d'auteurs (author_entity / author_entity_member) ---
+# Seed pg_library : auteurs local_id 1=Frank Herbert, 2=J.R.R. Tolkien,
+# 3=Neil Gaiman, 4=Terry Pratchett - les 4 existent déjà, la fusion des
+# groupes A (1,2) et B (3,4) n'a donc besoin d'aucun auteur supplémentaire.
+
+
+def _add_alias(gw, a, b):
+    return gw.add_author_alias(a, b)
+
+
+def test_pg_get_aliases_sans_groupe(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    group = gw.get_author_aliases("1")
+
+    assert group.group == ("1",) and group.names["1"]
+    assert group.names == {"1": "Frank Herbert"}
+    gw.close()
+
+
+def test_pg_get_aliases_auteur_inconnu(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(AuthorNotFoundError):
+        gw.get_author_aliases("9999")
+    gw.close()
+
+
+def test_pg_add_puis_get_aliases(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    group = _add_alias(gw, "1", "2")
+
+    assert set(group.group) == {"1", "2"}
+    assert group.names == {"1": "Frank Herbert", "2": "J.R.R. Tolkien"}
+    assert set(gw.get_author_aliases("2").group) == {"1", "2"}
+    gw.close()
+
+
+def test_pg_add_alias_auto_association_rejetee(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidAliasError):
+        _add_alias(gw, "1", "1")
+    gw.close()
+
+
+def test_pg_add_alias_inconnu_rejetee(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(AuthorNotFoundError):
+        _add_alias(gw, "1", "9999")
+    with pytest.raises(AuthorNotFoundError):
+        _add_alias(gw, "9999", "1")
+    gw.close()
+
+
+def test_pg_fusion_de_deux_groupes(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.add_author_alias("1", "2")  # groupe A
+    gw.add_author_alias("3", "4")  # groupe B
+
+    group = gw.add_author_alias("1", "3")  # fusion
+
+    assert set(group.group) == {"1", "2", "3", "4"}
+    assert set(gw.get_author_aliases("4").group) == {"1", "2", "3", "4"}
+    # La fusion est effective en base : une seule entité subsiste.
+    with gw._connection.cursor() as cur:
+        cur.execute("SELECT count(*) FROM author_entity")
+        assert cur.fetchone()[0] == 1
+    gw.close()
+
+
+def test_pg_add_alias_deja_dans_le_meme_groupe_est_sans_effet(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.add_author_alias("1", "2")
+
+    group = gw.add_author_alias("2", "1")
+
+    assert set(group.group) == {"1", "2"}
+    with gw._connection.cursor() as cur:
+        cur.execute("SELECT count(*) FROM author_entity")
+        assert cur.fetchone()[0] == 1
+    gw.close()
+
+
+def test_pg_display_author_est_l_auteur_createur_du_groupe(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    gw.add_author_alias("1", "2")
+
+    row = _pg_fetchone(
+        pg_library,
+        "SELECT a.local_id FROM author_entity ae"
+        " JOIN authors a ON a.id = ae.display_author_id",
+    )
+    assert row == (1,)
+    gw.close()
+
+
+def test_pg_remove_alias_puis_groupe_monopersonne_nettoye(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.add_author_alias("1", "2")
+
+    group = gw.remove_author_alias("1", "2")
+
+    assert group.group == ("1",)
+    assert gw.get_author_aliases("2").group == ("2",)
+    # plus aucune ligne author_entity résiduelle :
+    with gw._connection.cursor() as cur:
+        cur.execute("SELECT count(*) FROM author_entity")
+        assert cur.fetchone()[0] == 0
+    gw.close()
+
+
+def test_pg_remove_alias_garde_le_groupe_multi_membres(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+    gw.add_author_alias("1", "2")
+    gw.add_author_alias("1", "3")
+
+    group = gw.remove_author_alias("1", "2")
+
+    assert set(group.group) == {"1", "3"}
+    # L'alias détaché reste un auteur de la bibliothèque, sans groupe.
+    assert gw.get_author_aliases("2").group == ("2",)
+    gw.close()
+
+
+def test_pg_remove_alias_hors_groupe_rejetee(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidAliasError):
+        gw.remove_author_alias("1", "2")
+    gw.close()
+
+
+def test_pg_remove_alias_auto_association_rejetee(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidAliasError):
+        gw.remove_author_alias("1", "1")
+    gw.close()

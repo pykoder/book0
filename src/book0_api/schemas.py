@@ -2,6 +2,7 @@ from pydantic import BaseModel
 
 from book0_core.models import (
     Author,
+    AuthorAliasGroup,
     Book,
     BookContent,
     BookDetails,
@@ -357,3 +358,20 @@ class FieldValueOut(BaseModel):
     @classmethod
     def from_field_value(cls, field_value: FieldValue) -> "FieldValueOut":
         return cls(value=field_value.value, count=field_value.count)
+
+
+class AuthorAliasIn(BaseModel):
+    """Corps de POST /libraries/authors/{id}/aliases."""
+
+    alias_id: str
+
+
+class AuthorAliasGroupOut(BaseModel):
+    """Forme wire d'un groupe d'alias : ids membres + noms actuels."""
+
+    group: list[str]
+    names: dict[str, str]
+
+    @classmethod
+    def from_group(cls, group: AuthorAliasGroup) -> "AuthorAliasGroupOut":
+        return cls(group=list(group.group), names=dict(group.names))
