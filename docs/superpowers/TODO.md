@@ -65,3 +65,9 @@ concrete; the commit or plan that resolves an item removes its line.
   (auditabilité). Option : injecter `book_ids` dans `params` jsonb à la création.
   Deferred (2026-09-03) : aucun mécanisme de reprise des jobs pending n'existe — les jobs
   sont des enregistrements d'issues, pas du travail reprisable.
+
+- **Jobs : hypothèse mono-serveur** — le recovery `interrupted` au démarrage marque les jobs
+  `running` de TOUTES les bibliothèques du PG (gateway non scopé) ; deux instances API sur le
+  même PG s'interrompraient mutuellement leurs jobs en cours. Option : marquer par instance
+  (colonne owner/hostname) si le multi-serveur devient un objectif.
+  Deferred (2026-09-03) : déploiement mono-serveur assumé.
