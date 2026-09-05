@@ -7,6 +7,7 @@ SQLite - tandis que les BIGSERIAL (book_pk, authors.id, ...) restent
 internes au module.
 """
 
+import argparse
 import re
 import time
 import uuid
@@ -16,11 +17,19 @@ from pathlib import Path
 from typing import Literal, cast
 
 import psycopg
+from epub2md import build_markdown, parse_extract_spec
 
-from book0_core.errors import InvalidPatchError, LibraryNotFoundError
+from book0_core.errors import (
+    BookNotFoundError,
+    InvalidExtractError,
+    InvalidPatchError,
+    LibraryNotFoundError,
+    NoEpubError,
+)
 from book0_core.models import (
     Author,
     Book,
+    BookContent,
     BookDetails,
     BookDetailsResult,
     BookPatch,
@@ -146,6 +155,10 @@ _RATING_MAX_STARS = 5
 
 _SESSION_TIMEOUT_SECONDS = 60
 _PAGE_COUNT_CAP = 100  # en pages ; le plafond de lignes est _PAGE_COUNT_CAP * page_size
+
+# Niveau de découpage markdown accepté par epub2md (1 = titre seul, 7 = paragraphes).
+_LEVEL_MIN = 1
+_LEVEL_MAX = 7
 
 # Clés de tri pour query_books_page, exprimées contre les colonnes/alias du
 # _LIST_BOOKS_QUERY_BODY. Le schéma PG des books possède author_sort (contrairement
@@ -333,11 +346,14 @@ class PgLibraryGateway:
     session en mémoire stockant (sql, params, page_size), sans curseur serveur.
     """
 
-    def __init__(self, pg_dsn: str, tag: str) -> None:
+    def __init__(
+        self, pg_dsn: str, tag: str, markdown_cache_dir: Path | None = None
+    ) -> None:
         # Lectures seules : l'autocommit évite de maintenir une transaction
         # (donc des verrous ACCESS SHARE) ouverte entre deux opérations.
         self._connection = psycopg.connect(pg_dsn, autocommit=True)
         self._sessions: dict[str, _PaginationSession] = {}
+        self._markdown_cache_dir = markdown_cache_dir
         with self._connection.cursor() as cursor:
             cursor.execute(
                 "SELECT library_uuid, base_path FROM libraries WHERE name = %s",
@@ -631,6 +647,67 @@ class PgLibraryGateway:
         return [
             FieldValue(value=str(row[0]), count=cast("int", row[1])) for row in rows
         ]
+
+    def get_book_content(
+        self, book_id: str, level: int, extract: str | None
+    ) -> BookContent:
+        """Convertis l'EPUB d'un livre en markdown via epub2md, avec cache
+        disque clé par (book_id, level, mtime de l'EPUB) : le cache est
+        invalidé dès que l'EPUB change sur disque. markdown_cache_dir=None
+        (constructeur) désactive le cache - conversion à chaque appel."""
+        if not _LEVEL_MIN <= level <= _LEVEL_MAX:
+            raise InvalidExtractError(f"level hors {_LEVEL_MIN}-{_LEVEL_MAX} : {level}")
+        if not _VALID_ID_PATTERN.fullmatch(book_id):
+            raise BookNotFoundError(f"Book not found: local_id={book_id}")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT book_pk, path FROM books"
+                " WHERE library_uuid = %s AND local_id = %s",
+                (self._library_uuid, int(book_id)),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise BookNotFoundError(f"Book not found: local_id={book_id}")
+            book_pk, book_path = int(row[0]), str(row[1])
+            cursor.execute(
+                "SELECT name FROM data WHERE book_pk = %s AND format = 'EPUB'",
+                (book_pk,),
+            )
+            data_row = cursor.fetchone()
+        if data_row is None:
+            raise NoEpubError(f"No EPUB for book local_id={book_id}")
+        epub_path = self._library_root / book_path / f"{data_row[0]}.epub"
+        if not epub_path.is_file():
+            raise NoEpubError(f"EPUB file missing on disk: {epub_path}")
+        extract_spec: tuple[str, str, bool] | None = None
+        if extract is not None:
+            try:
+                extract_spec = parse_extract_spec(extract)
+            except argparse.ArgumentTypeError as exc:
+                raise InvalidExtractError(
+                    f"extract invalide : {extract!r} ({exc})"
+                ) from None
+
+        cache_path: Path | None = None
+        if self._markdown_cache_dir is not None:
+            cache_path = self._markdown_cache_dir / (
+                f"{book_id}-{level}-{int(epub_path.stat().st_mtime)}.md"
+            )
+            if cache_path.is_file():
+                return BookContent(
+                    book_id=book_id,
+                    level=level,
+                    extract=extract,
+                    markdown=cache_path.read_text(encoding="utf-8"),
+                )
+
+        markdown = build_markdown(epub_path, level, extract=extract_spec)
+        if cache_path is not None:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(markdown, encoding="utf-8")
+        return BookContent(
+            book_id=book_id, level=level, extract=extract, markdown=markdown
+        )
 
     def edit_books(
         self, ids: list[str], patch: BookPatch, dry_run: bool = False

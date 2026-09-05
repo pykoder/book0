@@ -1,10 +1,19 @@
+import os
+
 import psycopg
 import pytest
 
-from book0_core.errors import InvalidPatchError, LibraryNotFoundError
+from book0_core.errors import (
+    BookNotFoundError,
+    InvalidExtractError,
+    InvalidPatchError,
+    LibraryNotFoundError,
+    NoEpubError,
+)
 from book0_core.gateway import ReadLibraryGateway
 from book0_core.models import (
     Author,
+    BookContent,
     BookPatch,
     BookQuery,
     BookSort,
@@ -19,6 +28,7 @@ from tests.conftest import (
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
     CALIBRE_LIBRARY_SERIES,
+    PG_DUNE_EPUB_RELATIVE,
     _expected_details_with_cover,
 )
 
@@ -597,4 +607,128 @@ def test_pg_edit_books_series_index_invalide_leve_invalid_patch(pg_library):
 
     with pytest.raises(InvalidPatchError):
         gw.edit_books(["1"], BookPatch(series_index="abc"))
+    gw.close()
+
+
+# --- get_book_content : EPUB -> markdown via epub2md, cache disque mtime ---
+# L'EPUB minimal de Dune (fixture pg_library) porte le titre « Livre Test ».
+
+
+def _dune_epub_path(pg_library_root):
+    return pg_library_root / PG_DUNE_EPUB_RELATIVE
+
+
+def test_pg_get_book_content_convertit(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    content = gw.get_book_content("1", 7, None)
+
+    assert content == BookContent(
+        book_id="1", level=7, extract=None, markdown=content.markdown
+    )
+    assert "Livre Test" in content.markdown
+    assert "Chapitre 1" in content.markdown and "Chapitre 2" in content.markdown
+    gw.close()
+
+
+def test_pg_get_book_content_passe_l_extract_a_epub2md(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    content = gw.get_book_content("1", 7, "1...1")
+
+    assert content.extract == "1...1"
+    assert "Chapitre 1" in content.markdown
+    assert "Chapitre 2" not in content.markdown
+    gw.close()
+
+
+def test_pg_get_book_content_extract_invalide(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidExtractError):
+        gw.get_book_content("1", 7, "pas-de-points")
+    gw.close()
+
+
+def test_pg_get_book_content_level_hors_bornes(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(InvalidExtractError):
+        gw.get_book_content("1", 0, None)
+    with pytest.raises(InvalidExtractError):
+        gw.get_book_content("1", 8, None)
+    gw.close()
+
+
+def test_pg_get_book_content_livre_inconnu(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(BookNotFoundError):
+        gw.get_book_content("9999", 7, None)
+    gw.close()
+
+
+def test_pg_get_book_content_sans_epub(pg_library):
+    # The Hobbit (local_id 2) : aucune ligne data format='EPUB'.
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(NoEpubError):
+        gw.get_book_content("2", 7, None)
+    gw.close()
+
+
+def test_pg_get_book_content_fichier_epub_manquant(pg_library, pg_library_root):
+    _dune_epub_path(pg_library_root).unlink()
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    with pytest.raises(NoEpubError):
+        gw.get_book_content("1", 7, None)
+    gw.close()
+
+
+def test_pg_get_book_content_cache_reutilise(pg_library, pg_library_root, tmp_path):
+    cache_dir = tmp_path / "mdcache"
+    gw = PgLibraryGateway(pg_library, "grimoire-test", markdown_cache_dir=cache_dir)
+    epub_mtime = int(_dune_epub_path(pg_library_root).stat().st_mtime)
+
+    first = gw.get_book_content("1", 7, None)
+
+    cached = cache_dir / f"1-7-{epub_mtime}.md"
+    assert cached.is_file()
+    assert cached.read_text(encoding="utf-8") == first.markdown
+
+    # Un contenu sentinelle dans le cache est servi tel quel : pas de reconversion.
+    cached.write_text("SENTINELLE", encoding="utf-8")
+    second = gw.get_book_content("1", 7, None)
+    assert second.markdown == "SENTINELLE"
+    gw.close()
+
+
+def test_pg_get_book_content_sans_cache_dir_ne_cree_rien(pg_library, tmp_path):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    content = gw.get_book_content("1", 7, None)
+
+    assert "Livre Test" in content.markdown
+    assert not (tmp_path / "mdcache").exists()
+    gw.close()
+
+
+def test_pg_get_book_content_cache_invalide_si_epub_change(
+    pg_library, pg_library_root, tmp_path
+):
+    cache_dir = tmp_path / "mdcache"
+    gw = PgLibraryGateway(pg_library, "grimoire-test", markdown_cache_dir=cache_dir)
+    first = gw.get_book_content("1", 7, None)
+    epub_path = _dune_epub_path(pg_library_root)
+    old_mtime = int(epub_path.stat().st_mtime)
+
+    # toucher l'EPUB avec un mtime nettement postérieur : nouvelle clé de cache.
+    new_mtime = old_mtime + 10
+    os.utime(epub_path, (new_mtime, new_mtime))
+
+    second = gw.get_book_content("1", 7, None)
+
+    assert second.markdown == first.markdown  # reconverti, pas l'ancien cache
+    assert (cache_dir / f"1-7-{new_mtime}.md").is_file()
     gw.close()

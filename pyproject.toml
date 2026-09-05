@@ -5,6 +5,7 @@ description = "Calibre book lister"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "epub2md",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
     "psycopg[binary]>=3.2",
@@ -33,9 +34,19 @@ packages = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.uv.sources]
+epub2md = { path = "../epub2md", editable = true }
+
 [dependency-groups]
 dev = [
+    "ebooklib>=0.20",
     "mypy>=2.3.0",
     "pytest>=9.1.1",
     "ruff>=0.16.1",
 ]
+
+[tool.mypy]
+# epub2md (dépendance editable locale) ne publie pas de marqueur py.typed.
+[[tool.mypy.overrides]]
+module = "epub2md.*"
+ignore_missing_imports = true

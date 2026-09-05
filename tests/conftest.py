@@ -8,6 +8,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from ebooklib import epub
 
 from book0_core.models import (
     Author,
@@ -705,12 +706,45 @@ def pg_library_root(tmp_path: Path) -> Path:
     return root
 
 
+# Chemin relatif (depuis base_path) de l'EPUB minimal de Dune, aligné sur
+# books.path = 'Frank Herbert/Dune (1)/' et data.name = 'Dune' du seed PG.
+PG_DUNE_EPUB_RELATIVE = Path("Frank Herbert") / "Dune (1)" / "Dune.epub"
+
+
+def _write_minimal_epub(path: Path) -> None:
+    """Écrit un EPUB minimal à deux chapitres H1, TOC interne présente
+    (source auto = toc) — même pattern que la fixture minimal_epub d'epub2md."""
+    book = epub.EpubBook()
+    book.set_title("Livre Test")
+    book.add_author("A. Auteur")
+    c1 = epub.EpubHtml(title="Chapitre 1", file_name="c1.xhtml", lang="fr")
+    c1.content = (
+        "<h1>Chapitre 1</h1><p>Premier paragraphe.</p><p>Second paragraphe.</p>"
+    )
+    c2 = epub.EpubHtml(title="Chapitre 2", file_name="c2.xhtml", lang="fr")
+    c2.content = "<h1>Chapitre 2</h1><p>Troisième paragraphe.</p>"
+    book.add_item(c1)
+    book.add_item(c2)
+    book.toc = (
+        epub.Link("c1.xhtml", "Chapitre 1", "c1"),
+        epub.Link("c2.xhtml", "Chapitre 2", "c2"),
+    )
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", c1, c2]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    epub.write_epub(str(path), book)
+
+
 @pytest.fixture
 def pg_library(pg_dsn, pg_schema, pg_library_root: Path) -> str:
     """Bibliothèque PG 'grimoire-test' seedée à l'identique de calibre_metadata_db."""
     lib_uuid = GRIMOIRE_TEST_LIBRARY_UUID
     conn = pg_schema
     stamp = datetime(2024, 1, 1, tzinfo=UTC)
+    # L'EPUB sur disque pour Dune : la ligne data (format='EPUB', name='Dune')
+    # seedée ci-dessous correspond à ce fichier via base_path / books.path.
+    _write_minimal_epub(pg_library_root / PG_DUNE_EPUB_RELATIVE)
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO libraries (library_uuid, name, base_path) VALUES (%s, %s, %s)",
