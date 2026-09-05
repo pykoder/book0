@@ -151,6 +151,31 @@ CLI is invoked, so it always has to be passed explicitly:
 uv run book0-api --config book0-libraries.toml --server-config .book0-server.toml
 ```
 
+#### PostgreSQL catalog mode (`pg-dsn`) and the markdown cache (`markdown-cache-dir`)
+
+Two more optional keys live in `book0-libraries.toml`:
+
+- **`pg-dsn`** - when set, every route is served from the PostgreSQL catalog populated by
+  [`calibre_pg_sync`](../calibre_pg_sync/docs/calibre-to-pg-migration.md) instead of the
+  SQLite `metadata.db` paths above: the `[libraries]` mapping is ignored and the requested
+  tag resolves against the `libraries.name` table. One deliberate divergence between the
+  backends: an unknown tag is reported as `404 LibraryNotFoundError` in PG mode but as
+  `400 TagRequiredError` in SQLite mode - do not detect an unknown tag from the status
+  code alone. All the write routes - `PATCH /libraries/books`,
+  `GET /libraries/books/{id}/content`, the author-alias routes,
+  `POST /libraries/authors/{id}/apply-name`, and the `/libraries/jobs` routes - require
+  this mode; in SQLite mode they answer `501`.
+- **`markdown-cache-dir`** - PG mode only. Names the directory where
+  `GET /libraries/books/{id}/content` caches the markdown it converts from each book's
+  EPUB (cache files are keyed by book id, requested level, the EPUB's mtime and a short
+  hash of the requested extract, so a changed EPUB invalidates its own entries and two
+  distinct extracts never share a file). Leave it out and every content request converts
+  the EPUB from scratch.
+
+The routes and gateway protocols behind these keys are specified in
+`docs/superpowers/specs/2026-08-31-grimoire-api-librarygateway-design.md` (API contract)
+and `docs/superpowers/specs/2026-08-31-grimoire-pg-schema-design.md` (PG schema).
+
 #### Running behind nginx (Unix domain socket)
 
 For a production deployment behind nginx, use a `unix://` `--listen` URL to have `book0_api`

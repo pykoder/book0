@@ -25,14 +25,23 @@ src/
 │                                  # None, has_more_than_shown: bool, handle: str | None)
 │   ├── errors.py                # LibraryNotFoundError, NotACalibreLibraryError,
 │                                  # TagRequiredError
-│   ├── gateway.py                # LibraryGateway(Protocol): list_books() -> list[Book],
+│   ├── gateway.py                # ReadLibraryGateway(Protocol): list_books() -> list[Book],
 │                                    # list_authors() -> list[Author],
 │                                    # list_publishers() -> list[Publisher],
+│                                    # list_series() -> list[Series],
 │                                    # get_book_details(ids) -> BookDetailsResult,
 │                                    # list_books_page(page, page_size, handle=None) ->
 │                                    # PagedBooksResult, list_authors_page(...) ->
 │                                    # PagedAuthorsResult, list_publishers_page(...) ->
-│                                    # PagedPublishersResult, close_pagination(handle) -> None
+│                                    # PagedPublishersResult, list_series_page(...) ->
+│                                    # PagedSeriesResult, query_*_page(query, ...) ->
+│                                    # Paged*Result (filtres structurés, spec 2026-08-31 §5),
+│                                    # list_field_values(field) -> list[FieldValue],
+│                                    # close_pagination(handle) -> None;
+│                                    # MutableLibraryGateway(Protocol) - écritures (spec
+│                                    # 2026-08-31 §8.2): edit_books(...), get_book_content(...),
+│                                    # create_job/get_job/list_jobs_page(...), alias d'auteur
+│                                    # (get/add/remove_author_alias), apply_author_name(...)
 │   └── sqlite_gateway.py          # SqliteLibraryGateway: reads metadata.db read-only; resolves
 │                                    # a configured directory to <directory>/metadata.db itself,
 │                                    # so callers may pass either a library directory or a db file
@@ -102,7 +111,7 @@ src/
     │                                --with-covers (books-detail only, downloads and caches
     │                                covers), --page/--page-size (books/authors/publishers
     │                                only) -> HttpLibraryGateway
-    └── http_gateway.py             # HttpLibraryGateway: implements LibraryGateway over HTTP
+    └── http_gateway.py             # HttpLibraryGateway: implements ReadLibraryGateway over HTTP
 tests/
 ├── unit/                          # book0_presentation, book0_core models/errors, book0_config's
 │                                    # loader, book0_api's schemas - no I/O, no network
@@ -138,7 +147,7 @@ CLIs' tests all build on it rather than each defining their own fixture DB.
   not the server's internals or how tags get resolved to paths.
 - Nothing depends on `book0_cli` or `book0_cli_remote` - both are leaf packages, and neither
   depends on the other. Each has its own full `main.py`; the only thing that differs between
-  them, behaviorally, is which `LibraryGateway` implementation gets constructed and which
+  them, behaviorally, is which `ReadLibraryGateway` implementation gets constructed and which
   flags feed it: `--tag TAG` (optional, falling back to the config file's `default-library`)
   for `book0`, vs. `--server URL` (optional, falling back to a `.book0-client.toml` file) and
   `--tag TAG` (optional, server resolves its own `default-library`) for `book0-remote`.
@@ -153,8 +162,8 @@ CLIs' tests all build on it rather than each defining their own fixture DB.
   directory or a `metadata.db` file directly - `SqliteLibraryGateway.__init__` resolves that,
   not the callers.
 - Anything that consumes books (either CLI, a future third consumer) depends on the
-  `LibraryGateway` Protocol, not on a concrete implementation, so a gateway can be substituted
-  without changing the caller.
+  `ReadLibraryGateway`/`MutableLibraryGateway` Protocols, not on a concrete implementation,
+  so a gateway can be substituted without changing the caller.
 
 ## Zone rule
 

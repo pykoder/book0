@@ -19,8 +19,9 @@
   several tag-named libraries configured server-side, falling back to a `.book0-client.toml`
   file when `--server` is omitted and to the server's own configured `default-library` when
   `--tag` is omitted. Single consumer for both: a person running either CLI in a terminal.
-- **Architecture**: `book0_core` (domain: `Book`, the `LibraryGateway` `Protocol`, its SQLite
-  implementation, domain errors) has two consumers of the gateway abstraction -
+- **Architecture**: `book0_core` (domain: `Book`, the `ReadLibraryGateway`/
+  `MutableLibraryGateway` Protocols (spec 2026-08-31 §8), their SQLite and PG
+  implementations, domain errors) has two consumers of the gateway abstraction -
   `book0_cli` (direct, wires `SqliteLibraryGateway`) and `book0_cli_remote` (wires
   `HttpLibraryGateway`, talks to `book0_api` over REST). Both CLIs render output via the
   shared `book0_presentation` package. `book0_cli` and `book0_api` (FastAPI) also both depend

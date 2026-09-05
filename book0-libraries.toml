@@ -42,3 +42,12 @@ work = "${WORK_LIBRARY_PATH}"
 # LibraryNotFoundError in PG mode (the tag resolves against libraries.name).
 # Deliberate - do not rely on the status code to detect an unknown tag.
 # pg-dsn = "postgresql://postgres:…@localhost:5432/grimoire"
+
+# Optional: directory where GET /libraries/books/{id}/content caches the markdown
+# it converts from each book's EPUB. Cache files are keyed by book id, requested
+# level, the EPUB's mtime and a short hash of the requested extract, so a changed
+# EPUB invalidates its own entries and two distinct extracts never share a file.
+# Leave commented and every content request converts the EPUB from scratch.
+# Used only in PG mode - the content route answers 501 in SQLite mode either way.
+# Note: unlike the [libraries] paths, this key gets no ${VAR_NAME} expansion.
+# markdown-cache-dir = "/var/cache/book0/markdown"
