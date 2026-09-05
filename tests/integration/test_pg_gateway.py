@@ -130,6 +130,24 @@ def test_pg_get_book_details_reports_unknown_ids_as_missing(pg_library):
     assert set(result.missing_ids) == {"999", "abc"}
 
 
+def test_pg_get_book_details_tout_ids_invalides_rend_tout_missing(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    result = gw.get_book_details(["abc", "None", "abc"])
+
+    assert result.books == ()
+    assert result.missing_ids == ("abc", "None")
+
+
+def test_pg_get_book_details_liste_vide_rend_resultat_vide(pg_library):
+    gw = PgLibraryGateway(pg_library, "grimoire-test")
+
+    result = gw.get_book_details([])
+
+    assert result.books == ()
+    assert result.missing_ids == ()
+
+
 def test_pg_list_books_page_et_handle(pg_library):
     gw = PgLibraryGateway(pg_library, "grimoire-test")
 

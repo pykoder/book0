@@ -535,6 +535,10 @@ class PgLibraryGateway:
 
     def get_book_details(self, ids: list[str]) -> BookDetailsResult:
         deduped_ids, valid_ids = self._partition_ids(ids)
+        if not valid_ids:
+            # Aucun id sûr à placer dans un IN (...) : tout est missing, sans
+            # requête (un IN () vide serait une erreur de syntaxe PG).
+            return BookDetailsResult(books=(), missing_ids=tuple(deduped_ids))
 
         placeholders = ", ".join("%s" for _ in valid_ids)
         query = _GET_BOOK_DETAILS_QUERY_TEMPLATE.format(placeholders=placeholders)
