@@ -136,7 +136,10 @@ def test_render_book_details_table_aligns_columns_with_headers():
     # render_*_table tests).
     lines = [" ".join(line.split()) for line in output.splitlines()]
 
-    assert lines[0] == "ID Title Authors Publisher Series Series Index Tags Pub Date Cover Path"
+    assert (
+        lines[0]
+        == "ID Title Authors Publisher Series Series Index Tags Pub Date Cover Path"
+    )
     assert lines[1] == (
         "1 Dune Frank Herbert Ace Books Dune Chronicles 1.0 sci-fi & classic"
         " 1965-08-01 /library/Frank Herbert/Dune (1)/cover.jpg"

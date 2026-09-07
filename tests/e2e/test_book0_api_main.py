@@ -1,15 +1,15 @@
 import sqlite3
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
-from book0_api.main import create_app
-from tests.conftest import (
+from book0_core.testing import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
     CALIBRE_LIBRARY_SERIES,
 )
+from fastapi.testclient import TestClient
+
+from book0_api.main import create_app
 
 
 def test_list_books_returns_expected_books_for_a_known_tag(calibre_metadata_db: Path):

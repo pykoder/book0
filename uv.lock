@@ -96,17 +96,15 @@ name = "book0"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "book0-core" },
     { name = "calibre-pg-sync" },
-    { name = "epub2md" },
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "psycopg", extra = ["binary"] },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "ebooklib" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
@@ -114,12 +112,33 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "book0-core", editable = "../book0-core" },
     { name = "calibre-pg-sync", editable = "../calibre_pg_sync" },
-    { name = "epub2md", editable = "../epub2md" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.1" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=2.3.0" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "ruff", specifier = ">=0.16.1" },
+]
+
+[[package]]
+name = "book0-core"
+version = "0.1.0"
+source = { editable = "../book0-core" }
+dependencies = [
+    { name = "epub2md" },
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "epub2md", editable = "../epub2md" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
 ]
 
 [package.metadata.requires-dev]

@@ -2,6 +2,11 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from book0_core.testing import (
+    CALIBRE_LIBRARY_AUTHORS,
+    CALIBRE_LIBRARY_BOOKS,
+    CALIBRE_LIBRARY_PUBLISHERS,
+)
 
 from book0_cli.main import run
 from book0_presentation.tables import (
@@ -9,11 +14,6 @@ from book0_presentation.tables import (
     render_book_details_table,
     render_book_table,
     render_publisher_table,
-)
-from tests.conftest import (
-    CALIBRE_LIBRARY_AUTHORS,
-    CALIBRE_LIBRARY_BOOKS,
-    CALIBRE_LIBRARY_PUBLISHERS,
 )
 
 

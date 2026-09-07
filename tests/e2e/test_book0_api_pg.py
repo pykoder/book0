@@ -2,12 +2,12 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from book0_core.pg_gateway import PgLibraryGateway
+from book0_core.testing import GRIMOIRE_TEST_LIBRARY_UUID
 from fastapi.testclient import TestClient
 
 import book0_api.jobs
 from book0_api.main import create_app
-from book0_core.pg_gateway import PgLibraryGateway
-from tests.conftest import GRIMOIRE_TEST_LIBRARY_UUID
 
 
 def test_api_pg_list_books(pg_library):
