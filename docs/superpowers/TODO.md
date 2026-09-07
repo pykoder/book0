@@ -92,3 +92,11 @@ concrete; the commit or plan that resolves an item removes its line.
   `_QUERY_ALL_PAGE_SIZE = 100_000` : au-delà, le surplus disparaît de la réponse sans
   erreur ni avertissement. Deferred (2026-09-05) : le plafond protège le serveur d'une
   requête non bornée ; dépasser 100k lignes filtrées n'est pas un cas d'usage actuel.
+
+- **book0-django : backend Django alternatif de l'API book0.** Après le split
+  book0-core / book0-cli / book0-fastapi (spec
+  `2026-09-07-book0-repo-split-design.md`) : nouveau dépôt dépendant de `book0-core`,
+  servant le même contrat REST que `book0_api` (lectures + lectures PG d'abord ; routes
+  d'écriture différées ; schéma compatible OpenAPI pour la génération de types de
+  jaquette ; lanceur `jaquette-django.sh`). Deferred (2026-09-07) : cycle propre
+  brainstorming/spec/plan, à lancer une fois le split réalisé.
