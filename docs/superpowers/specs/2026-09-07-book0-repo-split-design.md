@@ -1,7 +1,7 @@
 # book0 repo split: book0-core, book0-cli, book0-fastapi — design
 
 Date: 2026-09-07
-Status: approved design, pending implementation plan
+Status: implemented (see plans/2026-09-07-book0-repo-split.md)
 Supersedes: nothing
 Related: `2026-08-31-grimoire-api-librarygateway-design.md` (API contract),
 `2026-08-31-grimoire-pg-schema-design.md` (PG schema)
