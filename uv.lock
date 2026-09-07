@@ -92,41 +92,6 @@ wheels = [
 ]
 
 [[package]]
-name = "book0"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "book0-core" },
-    { name = "calibre-pg-sync" },
-    { name = "fastapi" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "book0-cli" },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "book0-core", editable = "../book0-core" },
-    { name = "calibre-pg-sync", editable = "../calibre_pg_sync" },
-    { name = "fastapi", specifier = ">=0.141.1" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.1" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "book0-cli", editable = "../book0-cli" },
-    { name = "mypy", specifier = ">=2.3.0" },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "ruff", specifier = ">=0.16.1" },
-]
-
-[[package]]
 name = "book0-cli"
 version = "0.1.0"
 source = { editable = "../book0-cli" }
@@ -166,6 +131,41 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "ebooklib", specifier = ">=0.20" },
+    { name = "mypy", specifier = ">=2.3.0" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "ruff", specifier = ">=0.16.1" },
+]
+
+[[package]]
+name = "book0-fastapi"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "book0-core" },
+    { name = "calibre-pg-sync" },
+    { name = "fastapi" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "book0-cli" },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "book0-core", editable = "../book0-core" },
+    { name = "calibre-pg-sync", editable = "../calibre_pg_sync" },
+    { name = "fastapi", specifier = ">=0.141.1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.1" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "book0-cli", editable = "../book0-cli" },
     { name = "mypy", specifier = ">=2.3.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.1" },

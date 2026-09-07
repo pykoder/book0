@@ -1,117 +1,40 @@
-# book0
+# book0-fastapi
 
-Lists the books, authors, or publishers in a [Calibre](https://calibre-ebook.com/) library,
-and fetches richer joined details (publisher, series, tags) for a specific set of book ids.
-Two ways to run it:
+The FastAPI HTTP service (`book0_api`) serving the book0 REST contract over one or more
+[Calibre](https://calibre-ebook.com/) libraries: `GET
+/libraries/{books,authors,publishers,series}?tag=...`, `POST /libraries/books/detail`,
+`GET /libraries/books/{id}/cover`, plus the PG-only write routes (mass edit, markdown
+content, author aliases, jobs).
 
-- **`book0`** - reads the library's `metadata.db` SQLite file directly (read-only).
-- **`book0-remote`** - talks over HTTP to `book0_api`, a small FastAPI service that reads
-  `metadata.db` on the server's behalf, for one of several tag-named libraries configured
-  server-side.
+It consumes the shared `book0-core` domain layer (editable path dep). Clients of the
+contract:
 
-Both produce identical output for the same library.
+- **`book0-remote`** - the HTTP-backed CLI, in [`../book0-cli`](../book0-cli).
+- **jaquette** - the web UI, a pure REST consumer (no Python).
+- **`book0-django`** (future) - an alternative backend serving the same contract.
+
+For the direct CLI (`book0`, reads `metadata.db` without a server), see
+[`../book0-cli`](../book0-cli).
 
 ## Install
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/), plus the sibling
+`../book0-core` and `../calibre_pg_sync` checkouts.
 
 ```sh
 uv sync
 ```
 
-This creates `.venv/` and installs all three console scripts (`book0`, `book0-remote`,
-`book0-api`) into it. Every command below is run through `uv run` - see `CLAUDE.md` for why.
+This creates `.venv/` and installs the `book0-api` console script into it. Every command
+below is run through `uv run` - see `CLAUDE.md` for why.
 
-## `book0` - direct CLI
-
-Point it at a library by tag (configured via `./.book0.toml`, or `~/.config/book0/config.toml` / `$XDG_CONFIG_HOME/book0/config.toml` as fallback), or omit `--tag` to use the config
-file's `default-library`, if set. Choose `books`, `authors`, `publishers`, or `books-detail` -
-`books` is the default:
-
-```sh
-uv run book0 books --tag <tag>      # or just `uv run book0 --tag <tag>` - `books` is the default
-uv run book0 authors --tag <tag>
-uv run book0 publishers --tag <tag>
-uv run book0 books-detail --ids 1,2,3 --tag <tag>
-# or, with no --tag:
-uv run book0                        # uses the config file's default-library (books)
-```
-
-```
-ID  Title       Author(s)      Pub Date
-1   Dune        Frank Herbert  1965-08-01
-```
-
-```
-ID  Name
-1   Frank Herbert
-```
-
-```
-ID  Name
-1   Ace Books
-```
-
-```
-ID  Title  Authors        Publisher  Series           Series Index  Tags              Pub Date    Cover Path
-1   Dune   Frank Herbert  Ace Books  Dune Chronicles  1.0           sci-fi & classic  1965-08-01  /path/to/fiction/Frank Herbert/Dune (1)/cover.jpg
-```
-
-Add `--page-size <N>` to page a `books`/`authors`/`publishers` listing instead of dumping the
-whole library (`books-detail` is unrelated and has no `--page`) - `--page <N>` picks which
-page (default `1`); a page footer (`Page 1 of 4`, or `Page 1 of many` past a bounded count) is
-printed after the table:
-
-```sh
-uv run book0 books --tag <tag> --page-size 50
-uv run book0 books --tag <tag> --page 2 --page-size 50
-```
-
-`--page-size` also has a config-file fallback: set `default-page-size = 50` in `.book0.toml`
-to paginate every listing by default without passing the flag each time; `--page-size`
-overrides it when given, and a `--page-size 0`/negative value (or a value with no source at
-all) means "not paginated", matching today's full-listing behavior.
-
-`books-detail` never errors on an unknown id - it prints a `Missing ids: ...` line after the
-table (or on its own, if none of the requested ids were found) instead.
-
-`.book0.toml` (or the XDG fallback) maps tags to library paths, same shape as
-`book0-libraries.toml`:
-
-```toml
-default-library = "fiction"
-
-[libraries]
-fiction = "/path/to/fiction"
-```
-
-`default-library` is optional - it names the tag `book0` uses when `--tag` is omitted. Leave
-it out and an omitted `--tag` is an error (see below).
-
-`${VAR_NAME}` placeholders are expanded against the environment here too - see the
-`book0-remote` + `book0_api` section below for the full explanation.
-
-An empty library prints `No books found.` (or `No authors found.` for `authors`, or
-`No publishers found.` for `publishers`; `books-detail` prints `No book details found.` when
-none of the requested ids match). A missing path or a file that isn't a Calibre library, no config file found at all (a config
-file is required whether or not `--tag` is given, since it also supplies `default-library`), a
-config file found that doesn't list the resolved tag, or `--tag` omitted with no
-`default-library` set in the config file, all print a one-line error to stderr and exit with
-status 1. Unlike `book0-remote` (below), an unconfigured tag is treated as an error here, not
-as an empty library.
-
-## `book0-remote` + `book0_api` - HTTP-backed CLI
-
-### 1. Start the server
+## Start the server
 
 `book0_api` serves one or more libraries, each identified by a short tag you choose. The
-mapping from tag to library path is a TOML file passed via `--config` - same `[libraries]`
-shape (including the optional `default-library` key) as `book0`'s own `.book0.toml` (see
-above), so either CLI can read the same file. Each value can be a library's directory
-(`book0_api` appends `metadata.db` itself, just like `book0` does) or a `metadata.db` file
-path directly. A `default-library` set here is used server-side whenever a `book0-remote`
-request omits `--tag` - it is independent of any `default-library` in a `book0` client's own
-`.book0.toml`.
+mapping from tag to library path is a TOML file passed via `--config`, with a
+`[libraries]` shape. Each value can be a library's directory (the gateway appends
+`metadata.db` itself) or a `metadata.db` file path directly. A `default-library` set here
+is used server-side whenever a request omits `tag`.
 
 The committed template, `book0-libraries.toml`, holds `${VAR_NAME}` placeholders instead of
 real paths (safe to commit - no real filesystem paths in the repo). Set the env vars it
@@ -143,15 +66,15 @@ uv run book0-api --config book0-libraries.toml --listen http://0.0.0.0:9000
 
 `--server-config PATH` supplies `--listen` when the flag itself is omitted, from a
 `.book0-server.toml` file with a single `listen = "http://host:port"` (or
-`listen = "unix:///path"`) key. Unlike `book0-remote`'s client-side config file (see below),
-`--server-config` is never auto-discovered - the server is started far less often than either
-CLI is invoked, so it always has to be passed explicitly:
+`listen = "unix:///path"`) key. Unlike the remote CLI's client-side config file (see
+`../book0-cli`), `--server-config` is never auto-discovered - the server is started far
+less often than clients are invoked, so it always has to be passed explicitly:
 
 ```sh
 uv run book0-api --config book0-libraries.toml --server-config .book0-server.toml
 ```
 
-#### PostgreSQL catalog mode (`pg-dsn`) and the markdown cache (`markdown-cache-dir`)
+### PostgreSQL catalog mode (`pg-dsn`) and the markdown cache (`markdown-cache-dir`)
 
 Two more optional keys live in `book0-libraries.toml`:
 
@@ -176,7 +99,7 @@ The routes and gateway protocols behind these keys are specified in
 `docs/superpowers/specs/2026-08-31-grimoire-api-librarygateway-design.md` (API contract)
 and `docs/superpowers/specs/2026-08-31-grimoire-pg-schema-design.md` (PG schema).
 
-#### Running behind nginx (Unix domain socket)
+### Running behind nginx (Unix domain socket)
 
 For a production deployment behind nginx, use a `unix://` `--listen` URL to have `book0_api`
 listen on a Unix domain socket instead of a TCP host/port:
@@ -204,7 +127,7 @@ If the process was killed rather than shut down cleanly, remove the stale socket
 (`rm /run/book0-api.sock`) before starting it again, or the bind will fail with "address
 already in use".
 
-#### Restricting access
+### Restricting access
 
 `book0_api` has no authentication/authorization of its own (by design - see
 `docs/superpowers/specs/2026-08-04-book0-api-and-remote-cli-design.md`'s "out of scope"
@@ -227,64 +150,18 @@ front of `book0_api` instead:
 - Without nginx (e.g. `--listen http://0.0.0.0:<port>` directly), restrict the port at the OS
   firewall (`ufw`, `iptables`, `pf`) to the same specific addresses/subnet instead.
 
-### 2. Run the CLI against it
-
-`--server` may be omitted - `book0-remote` then falls back to a `.book0-client.toml` file
-(checked in the current directory, then `~/.config/book0/client.toml` /
-`$XDG_CONFIG_HOME/book0/client.toml`), mirroring how `.book0.toml` (above) supplies
-`default-library`:
-
-```toml
-server = "http://127.0.0.1:8000"
-cover-cache-dir = "/path/to/local/cover/cache"
-```
-
-`cover-cache-dir` is optional - it names the local directory `books-detail --with-covers`
-downloads and caches cover images into (see below). Leave it out and `book0-remote` falls back
-to an XDG cache directory: `~/.cache/book0/covers` / `$XDG_CACHE_HOME/book0/covers`.
-
-```sh
-uv run book0-remote books --server http://127.0.0.1:8000 --tag fiction
-# or just `uv run book0-remote --server ... --tag fiction` - `books` is the default
-uv run book0-remote authors --server http://127.0.0.1:8000 --tag fiction
-uv run book0-remote publishers --server http://127.0.0.1:8000 --tag fiction
-uv run book0-remote books-detail --ids 1,2,3 --server http://127.0.0.1:8000 --tag fiction
-uv run book0-remote books-detail --ids 1,2,3 --with-covers --server http://127.0.0.1:8000 --tag fiction
-# or, with no --tag - relies on the *server's* configured default-library, not any
-# client-side setting:
-uv run book0-remote --server http://127.0.0.1:8000
-```
-
-Same table output, same `No books found.` / `No authors found.` / `No publishers found.` /
-`No book details found.` for an empty library. A tag
-that isn't configured on the server behaves like an empty library rather than an error. A
-configured-but-broken library on the server (missing file, not a Calibre library), `--tag`
-omitted with no `default-library` configured on the server, or an unreachable server all print
-a one-line error to stderr and exit with status 1.
-
-`--page`/`--page-size` work the same way as `book0`'s, with `.book0-client.toml`'s
-`default-page-size` as the config-file fallback instead of `.book0.toml`'s. A server operator
-can additionally set `default-page-size` in `book0-libraries.toml` as a hard ceiling - it caps
-any client-requested `--page-size` down to that value, and forces pagination even when a
-client sends none at all; `book0-remote` handles a forced response transparently, so
-`books`/`authors`/`publishers` without `--page-size` still show the complete listing (just via
-more requests under the hood) unless you pass `--page-size` yourself to see one page at a
-time.
-
-`books-detail`'s `Cover Path` column shows the local filesystem path to a cover once it has
-been downloaded and cached, or `(unavailable)` when the server reports the book has a cover but
-it hasn't been cached locally yet - pass `--with-covers` to download and cache it (a book with
-no cover at all leaves the cell blank). Without `--with-covers`, `book0-remote` still reports an
-already-cached cover's local path; it just doesn't fetch anything new over the network.
-
 ## Development
 
 ```sh
-uv run pytest              # full test suite
+uv run pytest              # full test suite (PG tests need docker)
 uv run ruff check .        # lint
 uv run ruff format .       # format
 uv run mypy src            # type-check
 ```
+
+`tests/integration/test_http_gateway.py` is the REST contract suite: it drives the real
+`HttpLibraryGateway` from the `book0-cli` repo (dev-only path dependency) against the real
+app, pinning the JSON shapes and status codes every consumer relies on.
 
 See `CLAUDE.md` and `.claude/rules/` for the architecture, conventions, and workflow this
 project follows, and `docs/superpowers/specs/` for the design docs behind each feature.

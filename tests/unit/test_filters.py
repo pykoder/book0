@@ -1,7 +1,7 @@
 import pytest
+from book0_core.errors import InvalidFilterError
 
 from book0_api.filters import parse_id_list, parse_int_list, parse_text_list
-from book0_core.errors import InvalidFilterError
 
 
 def test_id_list_simple():

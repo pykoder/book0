@@ -1,7 +1,7 @@
 [project]
-name = "book0"
+name = "book0-fastapi"
 version = "0.1.0"
-description = "Calibre book lister"
+description = "FastAPI service serving the book0 REST contract over Calibre libraries"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
