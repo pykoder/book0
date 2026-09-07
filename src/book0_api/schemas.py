@@ -1,5 +1,3 @@
-from pydantic import BaseModel
-
 from book0_core.errors import InvalidApplyNameError
 from book0_core.models import (
     ApplyNameRequest,
@@ -27,6 +25,7 @@ from book0_core.models import (
     Series,
     SeriesItem,
 )
+from pydantic import BaseModel
 
 
 class AuthorOut(BaseModel):

@@ -3,6 +3,31 @@ from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import Literal
 
+from book0_core.errors import (
+    AuthorNameMismatchError,
+    AuthorNotFoundError,
+    BookNotFoundError,
+    InvalidAliasError,
+    InvalidApplyNameError,
+    InvalidExtractError,
+    InvalidFilterError,
+    InvalidPatchError,
+    LibraryNotFoundError,
+    NoEpubError,
+    NotACalibreLibraryError,
+    TagRequiredError,
+    UnknownJobActionError,
+)
+from book0_core.models import (
+    BookQuery,
+    BookSort,
+    JobAction,
+    JobRequest,
+    JobStatus,
+    SortOrder,
+)
+from book0_core.pg_gateway import PgLibraryGateway
+from book0_core.sqlite_gateway import SqliteLibraryGateway
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.responses import JSONResponse, Response
 
@@ -31,31 +56,6 @@ from book0_api.schemas import (
     PublisherOut,
     SeriesOut,
 )
-from book0_core.errors import (
-    AuthorNameMismatchError,
-    AuthorNotFoundError,
-    BookNotFoundError,
-    InvalidAliasError,
-    InvalidApplyNameError,
-    InvalidExtractError,
-    InvalidFilterError,
-    InvalidPatchError,
-    LibraryNotFoundError,
-    NoEpubError,
-    NotACalibreLibraryError,
-    TagRequiredError,
-    UnknownJobActionError,
-)
-from book0_core.models import (
-    BookQuery,
-    BookSort,
-    JobAction,
-    JobRequest,
-    JobStatus,
-    SortOrder,
-)
-from book0_core.pg_gateway import PgLibraryGateway
-from book0_core.sqlite_gateway import SqliteLibraryGateway
 
 # Whitelist of the facet fields served by GET /libraries/values/{field}. The
 # dict (not a bare membership set) lets the str path param narrow to the
