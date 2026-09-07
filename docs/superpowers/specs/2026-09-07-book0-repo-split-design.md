@@ -75,12 +75,12 @@ Grimoire/
   sqlite3 only, no test-framework coupling. Single source of truth for the Calibre-shaped
   fixture; each consumer repo's `tests/conftest.py` wraps it in its own fixture.
 - `tests/` — gateway/model/config tests moved from book0.
-- Dependencies: `psycopg`, editable `epub2md` + `calibre_pg_sync` (both are only used by
-  `pg_gateway.py`, so their editable path deps move here). sqlite3 is stdlib.
+- Dependencies: `psycopg`, editable `epub2md` (used by `pg_gateway.py`). sqlite3 is
+  stdlib. `calibre_pg_sync` does NOT move here — only `book0_api/jobs.py` imports it.
 - Distribution name `book0-core`; packages `book0_core`, `book0_config`. Ships a
   `py.typed` marker so consumers' `uv run mypy src` keeps working (required now that it
-  is an installed dependency rather than a sibling package); the `epub2md`/
-  `calibre_pg_sync` mypy overrides move here too.
+  is an installed dependency rather than a sibling package); the `epub2md` mypy override
+  moves here too.
 
 ### book0-cli (new repo, fresh history)
 
@@ -98,8 +98,10 @@ Grimoire/
 
 - `src/book0_api/` only; console script `book0-api`. Import names do not change.
 - Distribution name `book0-fastapi`; the `book0` distribution name disappears.
-- Dependencies: `book0-core` (path dep), `fastapi`, `uvicorn`; drops `httpx` and
-  `psycopg` (the latter now comes via book0-core).
+- Dependencies: `book0-core` (path dep), `fastapi`, `uvicorn`, `calibre-pg-sync`
+  (imported by `book0_api/jobs.py`); drops `httpx` and `psycopg`. Dev-only: a path dep
+  on `book0-cli` (see Tests — the contract suite drives the real `HttpLibraryGateway`);
+  this does not relax the runtime dependency-direction rule.
 - `book0-libraries.toml` (with `${VAR}` placeholders), `book0-api.toml`, and the
   `.book0-server.toml` docs stay here (server-side configuration).
 - `docs/superpowers/` (specs + plans + TODO.md) stays here as the design archive.
@@ -160,18 +162,27 @@ constants and exposes them as local fixtures.
 | unit: models, errors, config loader | book0-core |
 | unit: api schemas, filters | book0-fastapi |
 | integration: `test_sqlite_gateway.py`, `test_pg_gateway.py` | book0-core |
-| integration: `test_cli_main.py`, `test_cli_remote_main.py`, `test_cli_remote_config.py`; presentation tests | book0-cli |
+| integration: `test_cli_main.py`, `test_cli_remote_config.py`; presentation tests | book0-cli |
+| integration: `test_cli_remote_main.py` | book0-cli, **rewritten** against an `httpx.MockTransport` contract stub (`run(argv, client=...)` accepts an injected `httpx.Client`, so no FastAPI import is needed) |
 | integration: `test_http_gateway.py` | **book0-fastapi** (it imports `book0_api.main.create_app` + `fastapi.testclient` — it is the API contract test) |
 | e2e: API routes | book0-fastapi |
 
 ### One behavioral test change
 
-`HttpLibraryGateway` loses its real-server test in book0-cli (the suite that tested it
-via `create_app` moves to book0-fastapi). Replacement in book0-cli: integration tests
-against `httpx.MockTransport` with a small stub implementing the REST contract — no
-FastAPI import, preserving repo independence. The end-to-end contract stays covered by
-book0-fastapi's moved `test_http_gateway.py`. No test is weakened or deleted — only
-moved, or replaced by the MockTransport equivalent.
+The remote-CLI suites that drove `run()`/`HttpLibraryGateway` against a real
+`create_app` split in two:
+
+- book0-fastapi keeps `test_http_gateway.py` as the real-server contract suite. To
+  construct the real consumer it adds `book0-cli` as a **dev-only** path dependency;
+  runtime code never imports it and the dependency-direction rule is unchanged.
+- book0-cli gets a rewritten `test_cli_remote_main.py` whose tests inject
+  `httpx.Client(transport=httpx.MockTransport(stub))` into `run(argv, client=...)`,
+  where `stub` is a small handler implementing the REST contract's JSON shapes
+  (`items`/`page`/`page_size`/`total_pages`/`has_more_than_shown`, `BookOut` fields,
+  `{"error": ..., "detail": ...}` bodies for 400/404/500).
+
+No test is weakened or deleted — only moved, or replaced by the MockTransport
+equivalent.
 
 ## Guidelines and docs split
 
