@@ -23,14 +23,6 @@ avec leur code vers `../book0-core/docs/superpowers/TODO.md`.
   (colonne owner/hostname) si le multi-serveur devient un objectif.
   Deferred (2026-09-03) : déploiement mono-serveur assumé.
 
-- [ ] **Filtres structurés et facettes jamais câblés côté `book0-remote`** —
-  `HttpLibraryGateway` (`src/book0_cli_remote/http_gateway.py`) lève `NotImplementedError`
-  pour les 4 `query_*_page` (books/authors/publishers/series) et pour `list_field_values` :
-  les filtres structurés et la route `GET /libraries/values/{field}` ne sont donc
-  consommables qu'en HTTP direct (jaquette, curl), pas depuis le CLI `book0-remote`.
-  Deferred (2026-09-05) : le P2 n'exigeait la parité que sur les lectures de base du CLI ;
-  côté serveur, les filtres fonctionnent en mode SQLite comme en mode PG.
-
 - [ ] **Requêtes filtrées non paginées plafonnées en silence à 100 000 lignes** — sans
   `page_size` explicite (ni `default-page-size` serveur), les routes filtrées/triées
   (`query_*_page`, y compris jobs) de `book0_api/main.py` interrogent avec

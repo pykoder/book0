@@ -4,6 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from book0_cli_remote.http_gateway import HttpLibraryGateway
 from book0_core.errors import (
     LibraryNotFoundError,
     NotACalibreLibraryError,
@@ -27,7 +28,6 @@ from book0_core.testing import (
 from fastapi.testclient import TestClient
 
 from book0_api.main import create_app
-from book0_cli_remote.http_gateway import HttpLibraryGateway
 
 
 def _client_for(
