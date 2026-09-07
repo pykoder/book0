@@ -1,4 +1,4 @@
-# CLAUDE.md - Working guide for this project
+# CLAUDE.md - Working guide for book0-fastapi
 
 > This file is loaded automatically at the start of every session. Keep it **short**: it
 > holds only what must be known at all times. Everything task-specific lives in
@@ -7,29 +7,25 @@
 
 ## Project context
 
-- **Stack**: Python 3.12+, stdlib `sqlite3` (no ORM), stdlib `argparse`, stdlib `tomllib`,
-  FastAPI + Pydantic (for the HTTP boundary only), `httpx` (HTTP client), `pytest`, managed
+- **Stack**: Python 3.12+, stdlib `sqlite3` (no ORM), stdlib `tomllib`, FastAPI + Pydantic
+  (for the HTTP boundary only), `psycopg` (PG mode, via `book0-core`), `pytest`, managed
   with `uv`. No SQLAlchemy, no Alembic - there is no database to migrate, `metadata.db` is
   Calibre's, read-only.
-- **Domain**: two parallel ways to list the books in a Calibre library, both producing
-  identical output. `book0 [--tag <tag>]` reads the library's `metadata.db` SQLite file
-  directly (read-only), falling back to the `default-library` tag in its own config file when
-  `--tag` is omitted. `book0-remote [--server <url>] [--tag <tag>]` talks over HTTP to
-  `book0_api`, a FastAPI service that reads `metadata.db` on the server's behalf for one of
-  several tag-named libraries configured server-side, falling back to a `.book0-client.toml`
-  file when `--server` is omitted and to the server's own configured `default-library` when
-  `--tag` is omitted. Single consumer for both: a person running either CLI in a terminal.
-- **Architecture**: `book0_core` (domain: `Book`, the `ReadLibraryGateway`/
-  `MutableLibraryGateway` Protocols (spec 2026-08-31 §8), their SQLite and PG
-  implementations, domain errors) has two consumers of the gateway abstraction -
-  `book0_cli` (direct, wires `SqliteLibraryGateway`) and `book0_cli_remote` (wires
-  `HttpLibraryGateway`, talks to `book0_api` over REST). Both CLIs render output via the
-  shared `book0_presentation` package. `book0_cli` and `book0_api` (FastAPI) also both depend
-  on `book0_config` for tag-to-path TOML resolution; `book0_api` exposes
-  `GET /libraries/{books,authors,publishers}?tag=...` and
-  `POST /libraries/books/detail?tag=...`, `tag` optional with a server-side
-  `default-library` fallback. See `.claude/rules/architecture.md` for
-  the full tree and dependency direction.
+- **Domain**: the FastAPI HTTP service (`book0_api`) serving the book0 REST contract to
+  `book0-remote` (see `../book0-cli`), jaquette, and a future Django backend
+  (`../book0-django`): `GET /libraries/{books,authors,publishers,series}?tag=...`,
+  `POST /libraries/books/detail?tag=...`, `GET /libraries/books/{id}/cover`, plus the
+  PG-only write routes. `tag` is optional with a server-side `default-library` fallback
+  from `book0-libraries.toml`.
+- **Architecture**: `book0_api` is the only package. It depends on `book0-core`
+  (`ReadLibraryGateway`/`MutableLibraryGateway` Protocols, `SqliteLibraryGateway`/
+  `PgLibraryGateway`, `book0_config` for tag-to-path TOML resolution) as an editable path
+  dep, and never imports a CLI or `book0_presentation` - the API returns JSON, it never
+  renders a table. The dev group additionally has a path dep on `book0-cli`, used only by
+  the REST contract suite (`tests/integration/test_http_gateway.py` drives
+  `HttpLibraryGateway` against the real app); the runtime dependency direction is
+  unchanged - nothing depends on `book0-cli` at runtime. See
+  `.claude/rules/architecture.md`.
 - **Age**: greenfield, no technical debt yet. Keep it that way.
 - **Cross-cutting goal**: every change must reduce or hold technical debt, never increase it,
   even under deadline pressure.
@@ -60,10 +56,8 @@ step.
 | Add a runtime dependency | `uv add <package>` |
 | Add a dev-only dependency | `uv add --dev <package>` |
 | Remove a dependency | `uv remove <package>` |
-| Run the direct CLI | `uv run book0 [--tag <tag>]` |
 | Run the API server | `<ENV VARS FOR EACH LIBRARY> uv run book0-api --config book0-libraries.toml --reload` |
-| Run the remote CLI | `uv run book0-remote [--server <url>] [--tag <tag>]` (falls back to `.book0-client.toml`) |
-| Run the test suite | `uv run pytest` |
+| Run the test suite | `uv run pytest` (PG tests need docker) |
 | Run a test subset | `uv run pytest tests/unit -v` |
 | Lint | `uv run ruff check .` |
 | Format | `uv run ruff format .` |
@@ -83,16 +77,17 @@ These are the single source of truth for the project's hard "never" rules:
 - Never copy a legacy anti-pattern under the excuse of "consistency with the existing code":
   report the gap and propose better, within the scope requested.
 - Never use a mutable default argument (`def f(x: list = [])`) - use `None` + a guard.
-- Never let `book0_core` open a Calibre library for write - `SqliteLibraryGateway` connects
+- Never let a gateway open a Calibre library for write - `SqliteLibraryGateway` connects
   read-only (`mode=ro`); this tool must never modify a user's Calibre database.
-- Never let `book0_core` depend on `book0_cli`, `book0_cli_remote`, `book0_api`, `argparse`,
-  or any web/HTTP framework - the dependency direction is one-way (both CLIs and the API
-  depend on `book0_core`, never the reverse), so `book0_core` stays reusable by any future
-  consumer unchanged.
+- Never import `book0_cli`, `book0_cli_remote`, or `book0_presentation` in `book0_api` (and
+  never make the dev-only `book0-cli` path dep a runtime dependency) - the API depends only
+  on `book0-core`; the dependency direction is one-way, so the domain layer stays reusable
+  by any future consumer unchanged.
 - Never let `book0_api` return a raw `sqlite3.OperationalError` or unmapped 500 for a
   `book0_core` domain error it recognizes (`LibraryNotFoundError`,
   `NotACalibreLibraryError`, `TagRequiredError`) - map it to the documented status code +
-  error body so `HttpLibraryGateway` can reconstruct the same exception client-side.
+  error body so `HttpLibraryGateway` (in `../book0-cli`) can reconstruct the same exception
+  client-side.
 - Never invoke `python`, `pytest`, `ruff`, `mypy`, `uvicorn`, `fastapi`, etc. directly - always
   through `uv run <tool>` (see the tooling table above), so the locked, synced environment is
   always the one that runs.

@@ -6,171 +6,90 @@ paths:
 
 # Architecture and real source layout
 
-Before touching a file, identify which package it belongs to. Conventions differ by package.
+Before touching a file, identify which package it belongs to.
 
 ## Current layout
 
 ```
 book0-libraries.toml            # committed template for book0-api --config: ${VAR_NAME}
-                                  # placeholders, never real paths - see book0_config/config.py below
+                                # placeholders, never real paths - see book0_config below
 src/
-├── book0_core/
-│   ├── models.py               # Book: frozen dataclass (id, title, authors, pubdate);
-│                                  # Author/Publisher/Series: frozen dataclass (id, name);
-│                                  # SeriesItem (series, index); BookDetails (id, title,
-│                                  # pubdate, authors, tags, publisher, series);
-│                                  # BookDetailsResult (books, missing_ids);
-│                                  # PagedBooksResult/PagedAuthorsResult/PagedPublishersResult
-│                                  # (items: tuple[...], page, page_size, total_pages: int |
-│                                  # None, has_more_than_shown: bool, handle: str | None)
-│   ├── errors.py                # LibraryNotFoundError, NotACalibreLibraryError,
-│                                  # TagRequiredError
-│   ├── gateway.py                # ReadLibraryGateway(Protocol): list_books() -> list[Book],
-│                                    # list_authors() -> list[Author],
-│                                    # list_publishers() -> list[Publisher],
-│                                    # list_series() -> list[Series],
-│                                    # get_book_details(ids) -> BookDetailsResult,
-│                                    # list_books_page(page, page_size, handle=None) ->
-│                                    # PagedBooksResult, list_authors_page(...) ->
-│                                    # PagedAuthorsResult, list_publishers_page(...) ->
-│                                    # PagedPublishersResult, list_series_page(...) ->
-│                                    # PagedSeriesResult, query_*_page(query, ...) ->
-│                                    # Paged*Result (filtres structurés, spec 2026-08-31 §5),
-│                                    # list_field_values(field) -> list[FieldValue],
-│                                    # close_pagination(handle) -> None;
-│                                    # MutableLibraryGateway(Protocol) - écritures (spec
-│                                    # 2026-08-31 §8.2): edit_books(...), get_book_content(...),
-│                                    # create_job/get_job/list_jobs_page(...), alias d'auteur
-│                                    # (get/add/remove_author_alias), apply_author_name(...)
-│   └── sqlite_gateway.py          # SqliteLibraryGateway: reads metadata.db read-only; resolves
-│                                    # a configured directory to <directory>/metadata.db itself,
-│                                    # so callers may pass either a library directory or a db file
-├── book0_presentation/
-│   └── tables.py                  # render_book_table(list[Book]) -> str, render_author_table(list[Author]) -> str,
-│                                    # render_publisher_table(list[Publisher]) -> str,
-│                                    # render_book_details_table(list[BookDetails]) -> str,
-│                                    # aligned plain-text tables; order_book_details_by_ids(
-│                                    # BookDetailsResult, ids) -> list[BookDetails] and
-│                                    # format_missing_ids_message(missing_ids) -> str | None,
-│                                    # shared by both CLIs' books-detail dispatch;
-│                                    # format_page_footer(page, total_pages: int | None) -> str
-├── book0_config/
-│   └── config.py                  # load_libraries(path) -> LibraryConfig (libraries:
-│                                    # dict[str, Path], default_tag: str | None,
-│                                    # default_page_size: int | None = None), reads a TOML
-│                                    # file (default_tag from an optional top-level
-│                                    # `default-library` key, default_page_size from an
-│                                    # optional top-level `default-page-size` key); shared by
-│                                    # book0_cli and book0_api
-├── book0_cli/
-│   ├── config.py                  # xdg_config_path(), find_config_file()
-│   └── main.py                    # `book0` entry point: `books`/`authors`/`publishers`/
-│                                    # `books-detail` subcommands (books is the default), --tag
-│                                    # TAG (optional, falls back to config's default_tag; raises
-│                                    # TagRequiredError if neither is set), --ids (books-detail
-│                                    # only, required), --page/--page-size (books/authors/
-│                                    # publishers only) -> SqliteLibraryGateway
-├── book0_api/
-│   ├── main.py                    # create_app(libraries: dict[str, Path], default_tag:
-│   │                                # str | None = None, default_page_size: int | None =
-│   │                                # None) -> FastAPI; routes take `tag` as an optional
-│   │                                # `?tag=...` query parameter (not a `{tag}` path
-│   │                                # segment), falling back to default_tag, raising
-│   │                                # TagRequiredError (mapped to 400) if neither is set; the
-│   │                                # three list routes also take optional `page`/`page_size`
-│   │                                # query params, `page_size` capped/forced by
-│   │                                # default_page_size
-│   ├── asgi.py                    # `app` wired from CONFIG_ENV_VAR (BOOK0_API_CONFIG) - the
-│   │                                # real uvicorn import target ("book0_api.asgi:app")
-│   ├── cli.py                     # `book0-api` entry point: --config PATH (required), --reload,
-│   │                                # --listen URL (default http://127.0.0.1:8000): http://host:port
-│   │                                # or unix:///path/to/socket (e.g. for nginx via proxy_pass to
-│   │                                # unix:PATH), --server-config PATH (optional, never
-│   │                                # auto-discovered - supplies --listen from a .book0-server.toml
-│   │                                # file only when --listen itself is omitted) -> sets
-│   │                                # BOOK0_API_CONFIG, then uvicorn.run(...)
-│   └── schemas.py                 # BookOut: id, title, authors: list[str], pubdate;
-│                                    # AuthorOut/PublisherOut/SeriesOut: id, name;
-│                                    # SeriesItemOut: series, index; BookDetailsOut: id, title,
-│                                    # pubdate, authors, tags, publisher, series, has_cover;
-│                                    # BookDetailsResultOut: books, missing_ids; BookIdsIn: ids
-└── book0_cli_remote/
-    ├── config.py                   # xdg_config_path(), find_config_file() (same shape as
-    │                                # book0_cli/config.py's, different filename/subpath:
-    │                                # .book0-client.toml / book0/client.toml), plus
-    │                                # load_server(config_path: Path) -> str, xdg_cache_path(),
-    │                                # load_cover_cache_dir(config_path: Path) -> Path | None,
-    │                                # load_default_page_size(config_path: Path) -> int | None
-    ├── main.py                    # `book0-remote` entry point: `books`/`authors`/`publishers`/
-    │                                `books-detail` subcommands (books is the default),
-    │                                --server URL (optional, falls back to a .book0-client.toml
-    │                                file - see config.py above - when omitted), --tag TAG
-    │                                (optional - an omitted tag is sent to the server as no `tag`
-    │                                query parameter, and book0_api resolves its own server-side
-    │                                default_tag), --ids (books-detail only, required),
-    │                                --with-covers (books-detail only, downloads and caches
-    │                                covers), --page/--page-size (books/authors/publishers
-    │                                only) -> HttpLibraryGateway
-    └── http_gateway.py             # HttpLibraryGateway: implements ReadLibraryGateway over HTTP
+└── book0_api/
+    ├── main.py                 # create_app(libraries: dict[str, Path], default_tag:
+    │                           # str | None = None, default_page_size: int | None =
+    │                           # None, pg_dsn: str | None = None, markdown_cache_dir:
+    │                           # Path | None = None) -> FastAPI; routes take `tag` as an
+    │                           # optional `?tag=...` query parameter (not a `{tag}` path
+    │                           # segment), falling back to default_tag, raising
+    │                           # TagRequiredError (mapped to 400) if neither is set; the
+    │                           # list routes also take optional `page`/`page_size` query
+    │                           # params, `page_size` capped/forced by default_page_size
+    ├── asgi.py                 # `app` wired from CONFIG_ENV_VAR (BOOK0_API_CONFIG) - the
+    │                           # real uvicorn import target ("book0_api.asgi:app")
+    ├── cli.py                  # `book0-api` entry point: --config PATH (required),
+    │                           # --reload, --listen URL (default http://127.0.0.1:8000):
+    │                           # http://host:port or unix:///path/to/socket,
+    │                           # --server-config PATH (optional, never auto-discovered)
+    │                           # -> sets BOOK0_API_CONFIG, then uvicorn.run(...)
+    ├── filters.py              # raw filter-param parsing (parse_id_list, parse_text_list,
+    │                           # parse_int_list) raising InvalidFilterError
+    ├── jobs.py                 # run_job: background execution of PG jobs
+    │                           # (create_job -> 202 -> background task)
+    └── schemas.py              # the wire format: BookOut: id, title, authors: list[str],
+                               # pubdate; AuthorOut/PublisherOut/SeriesOut: id, name;
+                               # SeriesItemOut: series, index; BookDetailsOut: id, title,
+                               # pubdate, authors, tags, publisher, series, has_cover;
+                               # BookDetailsResultOut: books, missing_ids; BookIdsIn: ids;
+                               # plus the write-route schemas (PatchBooksIn, JobCreateIn,
+                               # alias/apply-name, ...)
 tests/
-├── unit/                          # book0_presentation, book0_core models/errors, book0_config's
-│                                    # loader, book0_api's schemas - no I/O, no network
-├── integration/                    # SqliteLibraryGateway and HttpLibraryGateway against a real
-│                                    # temp SQLite file / a real FastAPI app (via TestClient),
-│                                    # plus both CLIs' `run()` end to end
-└── e2e/                            # book0_api's routes via FastAPI's TestClient
+├── unit/                       # book0_api schemas - no I/O, no network
+├── integration/
+│   └── test_http_gateway.py    # the REST contract suite: HttpLibraryGateway (from
+│                              # ../book0-cli, dev path dep) driven against the real
+│                              # create_app(...) via TestClient - this is what pins the
+│                              # JSON shapes and status codes the consumers rely on
+└── e2e/                        # book0_api's routes via FastAPI's TestClient
 ```
 
-`tests/conftest.py` holds the shared Calibre-shaped SQLite fixture (`calibre_metadata_db`) and
-its expected `Book` list (`CALIBRE_LIBRARY_BOOKS`), `Author` list (`CALIBRE_LIBRARY_AUTHORS`),
-`Publisher` list (`CALIBRE_LIBRARY_PUBLISHERS`), and three named `BookDetails` fixtures
-(`DUNE_DETAILS`, `HOBBIT_DETAILS`, `GOOD_OMENS_DETAILS`) - `book0_core`, `book0_api`, and both
-CLIs' tests all build on it rather than each defining their own fixture DB.
+Shared fixtures live in `book0_core.testing` (the `book0-core` repo) - `tests/conftest.py`
+only wraps them as pytest fixtures (`calibre_metadata_db`, `many_books_db`,
+`expected_book_details`, and the PG fixtures). Never duplicate a fixture here.
 
 ## Dependency direction
 
-- `book0_core` depends on nothing project-specific and has no web/HTTP dependency.
-- `book0_presentation` depends only on `book0_core` (needs `Book`/`Author`/`Publisher`/
-  `BookDetails`/`BookDetailsResult` for `render_book_table`'s/`render_author_table`'s/
-  `render_publisher_table`'s/`render_book_details_table`'s/`order_book_details_by_ids`'s
-  signatures). No CLI, no web framework.
-- `book0_config` depends on nothing project-specific - stdlib only (`tomllib`, `os`, `re`,
-  `pathlib`).
-- `book0_cli` depends on `book0_core`, `book0_presentation`, **and `book0_config`** - directly
-  on `book0_core` (for `SqliteLibraryGateway` and the domain errors), not merely transitively
-  through `book0_presentation`.
-- `book0_api` depends on `book0_core` **and `book0_config`**. Never imports `book0_cli`,
-  `book0_cli_remote`, or `book0_presentation` - the API returns JSON, it never renders a
-  table.
-- `book0_cli_remote` depends on `book0_core` + `book0_presentation` + `httpx`. Never imports
-  `book0_api` or `book0_config` - it only knows the REST contract (a URL and a JSON shape),
-  not the server's internals or how tags get resolved to paths.
-- Nothing depends on `book0_cli` or `book0_cli_remote` - both are leaf packages, and neither
-  depends on the other. Each has its own full `main.py`; the only thing that differs between
-  them, behaviorally, is which `ReadLibraryGateway` implementation gets constructed and which
-  flags feed it: `--tag TAG` (optional, falling back to the config file's `default-library`)
-  for `book0`, vs. `--server URL` (optional, falling back to a `.book0-client.toml` file) and
-  `--tag TAG` (optional, server resolves its own `default-library`) for `book0-remote`.
-  Neither CLI shares a run loop with the other -
-  there is no shared run-loop function between them. That was a deliberate choice, not an
-  oversight, so do not "DRY them up" into one without a task that asks for it.
+- `book0_api` depends on `book0_core` (gateway Protocols, both implementations, domain
+  errors, models) **and `book0_config`** (tag-to-path TOML resolution), both as editable
+  path deps on `../book0-core`.
+- `book0_api` never imports `book0_cli`, `book0_cli_remote`, or `book0_presentation` - the
+  API returns JSON, it never renders a table, and it never parses CLI flags.
+- `book0-cli` (dev path dep `../book0-cli`) is used ONLY by
+  `tests/integration/test_http_gateway.py`: the contract suite drives the real
+  `HttpLibraryGateway` against the real app to pin the REST contract from the consumer's
+  side. Runtime code never imports it - the dependency direction (consumers depend on
+  core, never the reverse) is unchanged.
 - Code that talks to `metadata.db` (SQL, `sqlite3.connect`, schema assumptions, the
-  `metadata.db` filename itself) lives only in `book0_core/sqlite_gateway.py`. Nothing outside
-  it should open a connection, write SQL, or resolve a library directory to its db file -
-  including `book0_api`, which calls `SqliteLibraryGateway` exactly like `book0_cli` does, and
-  both CLIs' config files (`.book0.toml`, `book0-libraries.toml`) may name either a library
-  directory or a `metadata.db` file directly - `SqliteLibraryGateway.__init__` resolves that,
-  not the callers.
-- Anything that consumes books (either CLI, a future third consumer) depends on the
-  `ReadLibraryGateway`/`MutableLibraryGateway` Protocols, not on a concrete implementation,
-  so a gateway can be substituted without changing the caller.
+  `metadata.db` filename itself) lives only in `book0-core`'s `sqlite_gateway.py`.
+  `book0_api` calls `SqliteLibraryGateway` exactly like a CLI consumer would, and
+  `book0-libraries.toml` values may name either a library directory or a `metadata.db`
+  file directly - the gateway's `__init__` resolves that, not the routes.
+- All PG access goes through `book0-core`'s `PgLibraryGateway` (calibre_pg_sync schema).
+- Consumers of this service: `book0-remote` (in `../book0-cli`), jaquette (REST only, no
+  Python), and a future `../book0-django` backend serving the same contract. A change to a
+  route's JSON shape or status codes is a contract change - update
+  `tests/integration/test_http_gateway.py` and coordinate with `../book0-cli`.
+
+## Error-mapping contract
+
+Every route maps recognized `book0_core` domain errors to `{"error": "<Name>",
+"detail": str}` bodies with the documented status codes - `TagRequiredError` → 400,
+`LibraryNotFoundError` → 404, `NotACalibreLibraryError` → 500, plus the write-route errors
+(422 for invalid input, 404 for missing book/job/author). `HttpLibraryGateway`
+reconstructs the named exception client-side from the body; a new domain error must be
+mapped in every route that can raise it (see `../book0-cli`'s
+`tests/unit/test_error_types.py`).
 
 ## Zone rule
 
-- Clean zone (recently written, matches the layout above): align strictly on the existing
-  pattern.
-- Legacy/inherited zone (inconsistent, pre-dates this convention): do not copy bad practices.
-  Propose a compliant version within the requested scope; do not launch an unrequested
-  big-bang refactor.
-- This project is greenfield - there is no legacy zone yet. If you find one, it was introduced
-  after this file was written; report it rather than assuming it is intentional.
+- Greenfield - align strictly on the pattern above. If you find an inconsistency, report it
+  rather than assuming it is intentional.

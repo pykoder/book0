@@ -14,8 +14,6 @@ du module pour que les tests puissent le remplacer
 from collections.abc import Mapping
 from pathlib import Path
 
-from calibre_pg_sync.syncer import CalibreSyncer
-
 from book0_core.models import (
     JobAction,
     JobFailure,
@@ -23,6 +21,7 @@ from book0_core.models import (
     JobStatus,
 )
 from book0_core.pg_gateway import PgLibraryGateway
+from calibre_pg_sync.syncer import CalibreSyncer
 
 # Niveau de titres par défaut de la conversion markdown (spec §7.2).
 _DEFAULT_LEVEL = 7

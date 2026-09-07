@@ -4,9 +4,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
-
-from book0_api.main import create_app
 from book0_cli_remote.http_gateway import HttpLibraryGateway
 from book0_core.errors import (
     LibraryNotFoundError,
@@ -22,12 +19,15 @@ from book0_core.models import (
     PagedPublishersResult,
     PagedSeriesResult,
 )
-from tests.conftest import (
+from book0_core.testing import (
     CALIBRE_LIBRARY_AUTHORS,
     CALIBRE_LIBRARY_BOOKS,
     CALIBRE_LIBRARY_PUBLISHERS,
     CALIBRE_LIBRARY_SERIES,
 )
+from fastapi.testclient import TestClient
+
+from book0_api.main import create_app
 
 
 def _client_for(
